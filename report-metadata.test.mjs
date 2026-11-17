@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { selectStatementDocuments, sortIrDocuments, officialDocumentPeriod } from "./report-metadata.js";
 
+test("日産公式ファイル名の年度と四半期から期間を判定し、最新を先頭にする", () => {
+  const documents=[4,1].map((quarter,index)=>({title:'決算短信',url:`https://www.nissan-global.com/JP/IR/FINANCIAL_RESULTS/ASSETS/DATA/${2025+index}/${2025+index}${quarter===4?'4th':'1st'}_financialresult_172_j.pdf`}));
+  assert.deepEqual(officialDocumentPeriod(documents[1],'nissan'),{fiscalYear:2026,quarter:1,periodEnd:'2026-06-30'});
+  assert.deepEqual(officialDocumentPeriod(documents[0],'nissan'),{fiscalYear:2025,quarter:4,periodEnd:'2026-03-31'});
+  assert.equal(sortIrDocuments(documents,'nissan')[0].url,documents[1].url);
+});
+
 test("公表が翌期・翌年でも対象期間の開始年度と四半期を維持する", () => {
   const cases = [
     ["toyota", "2027_1q_summary_jp.pdf", "第1四半期決算情報 2026年8月4日", 2026, 1, "2026-06-30"],

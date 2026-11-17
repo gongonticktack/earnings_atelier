@@ -74,6 +74,26 @@ function chartResponse(close = 100) {
   }] } });
 }
 
+test("追加会社はDB未登録でも公式IRを取得でき、株価Cronの対象になる", async () => {
+  const env = makeEnv();
+  env.ASSETS.fetch = async () => Response.json({
+    supabase: { url: "https://example.supabase.co", key: "public-key" },
+    additionalCompanies: [{ code: "jt", stock_code: "2914", ir_url: "https://www.jti.co.jp/investors/library/result/" }],
+  });
+  globalThis.fetch = async input => {
+    const url = new URL(input);
+    if (url.hostname === "example.supabase.co") return Response.json([]);
+    if (url.hostname === "www.jti.co.jp") return new Response('<a href="/investors/library/result/pdf/20260730_01.pdf">2026年12月期 第2四半期 決算短信</a>');
+    assert.ok(url.pathname.endsWith("2914.T"));
+    return chartResponse();
+  };
+  const response = await worker.fetch(new Request("https://site.test/api/official-reports?company=jt"), env, {});
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).documents[0].companyCode, "jt");
+  await worker.scheduled({}, env, {});
+  assert.ok(env.records.has("stock-prices:2914.T"));
+});
+
 test("事前解析した内訳は会社と現在の公式原本URLが一致する資料だけ配信する", async () => {
   const sourceUrl = "https://official.test/report.pdf";
   const report = { companyCode:"toyota",sourceUrl,revenue:1000,netIncome:100,

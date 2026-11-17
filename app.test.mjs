@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { mergeFinancialResults, fiscalYearFromPeriod, fiscalPeriodLabel } from "./market.js";
-import { buildIncomeFlow, sankeyHubSize } from "./sankey.js";
+import { buildIncomeFlow, buildSegmentFlow, sankeyHubSize } from "./sankey.js";
 import { sortIrDocuments, officialDocumentPeriod } from "./report-metadata.js";
 import { buildCashFlow } from "./cash-flow.js";
 import { mergeOfficialStatements } from "./financial-reports.js";
@@ -14,7 +14,7 @@ import { stockIndicators } from "./stock-indicators.js";
 const source = (await readFile(new URL("./app.js", import.meta.url), "utf8"))
   .replaceAll("\r\n", "\n")
   .replace('import { mergeFinancialResults, fiscalYearFromPeriod, fiscalPeriodLabel } from "./market.js";', "")
-  .replace('import { buildIncomeFlow, sankeyHubSize } from "./sankey.js";', "")
+  .replace('import { buildIncomeFlow, buildSegmentFlow, sankeyHubSize } from "./sankey.js";', "")
   .replace('import { sortIrDocuments, officialDocumentPeriod } from "./report-metadata.js";', "")
   .replace('import { buildCashFlow } from "./cash-flow.js";', "")
   .replace('import { extractStatement, mergeOfficialStatements } from "./financial-reports.js";', "")
@@ -24,6 +24,51 @@ const source = (await readFile(new URL("./app.js", import.meta.url), "utf8"))
   .replaceAll("import.meta.url", '"https://site.test/app.js"')
   .replace("refreshCompany({ reloadDatabase: true });\n", "await refreshCompany({ reloadDatabase: true });\n");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test('企業切替では公式決算の統合が終わるまでGIFを表示し、途中の数値を見せない',async()=>{
+ const app=await setup();
+ let release;
+ app.setHandler(url=>url.pathname==='/api/official-reports'&&url.searchParams.get('company')==='nissan'
+  ?new Promise(resolve=>{release=()=>resolve(Response.json({documents:[],reports:[]}));}):null);
+ const pending=app.buttons.find(button=>button.dataset.company==='nissan').listeners.click();
+ assert.equal(app.nodes.get('#company-data').hidden,true);
+ assert.equal(app.nodes.get('#company-loading').hidden,false);
+ await tick();
+ assert.equal(typeof release,'function');
+ assert.equal(app.nodes.get('#company-data').hidden,true);
+ release();await pending;
+ assert.equal(app.nodes.get('#company-data').hidden,false);
+ assert.equal(app.nodes.get('#company-loading').hidden,true);
+});
+
+test('古い企業の完了で現在のローダーを消さず、取得失敗でも読み込み状態を解除する',async()=>{
+ const app=await setup();const release={};
+ app.setHandler(url=>url.pathname==='/api/official-reports'
+  ?new Promise(resolve=>{release[url.searchParams.get('company')]=()=>resolve(new Response('failure',{status:502}));}):null);
+ const first=app.buttons.find(b=>b.dataset.company==='nissan').listeners.click();await tick();
+ const second=app.buttons.find(b=>b.dataset.company==='honda').listeners.click();await tick();
+ release.nissan();await first;
+ assert.equal(app.nodes.get('#company-data').hidden,true);
+ release.honda();await second;
+ assert.equal(app.nodes.get('#company-loading').hidden,true);
+ assert.equal(app.nodes.get('#company-data').hidden,false);
+ assert.equal(app.state.companyCode,'honda');
+});
+
+test('取得中の企業へ戻った場合も同じ公式決算リクエストを待ち、最後に選んだ企業だけ表示する',async()=>{
+ const app=await setup();let finish;let requests=0;
+ app.setHandler(url=>url.pathname==='/api/official-reports'&&url.searchParams.get('company')==='nissan'
+  ?(requests++,new Promise(resolve=>{finish=()=>resolve(Response.json({documents:[],reports:[]}));})):null);
+ const nissan=app.buttons.find(b=>b.dataset.company==='nissan');
+ const first=nissan.listeners.click();await tick();
+ await app.buttons.find(b=>b.dataset.company==='honda').listeners.click();
+ await nissan.listeners.click();
+ assert.equal(requests,1);
+ assert.equal(app.nodes.get('#company-data').hidden,true);
+ finish();await first;
+ assert.equal(app.state.companyCode,'nissan');
+ assert.equal(app.nodes.get('#company-loading').hidden,true);
+});
 
 test('CFへ切り替えると決算書の期間・符号・原本内訳を表示し、未開示資料は空の図になる',async()=>{
  const app=await setup({chartWidth:286,ratio:3});
@@ -125,7 +170,7 @@ test("言語ボタンは企業・四半期・自動更新の選択を保ち、�
   assert.match(app.elements.dataStatus.textContent, /業績出典/);
 });
 
-async function setup({ chartWidth = 800, ratio = 1, nativeTimeout = true } = {}) {
+async function setup({ chartWidth = 800, ratio = 1, nativeTimeout = true, extract = async () => null } = {}) {
   const nodes = new Map();
   const timers = new Map();
   const calls = [];
@@ -142,7 +187,7 @@ async function setup({ chartWidth = 800, ratio = 1, nativeTimeout = true } = {})
     });
     return nodes.get(id);
   };
-  const buttons = ["toyota", "kioxia", "mufg"].map((company) => {
+  const buttons = ["toyota", "kioxia", "mufg", "jt", "nissan", "honda", "suzuki", "mazda", "subaru", "mitsubishi-motors", "isuzu", "archion", "nissan-shatai"].map((company) => {
     const button = element(company); button.dataset.company = company; return button;
   });
   const document = { hidden: false, listeners: {}, querySelector: element,
@@ -172,11 +217,55 @@ async function setup({ chartWidth = 800, ratio = 1, nativeTimeout = true } = {})
   };
   const sandbox = vm.createContext({ document, fetch, URL, Response, AbortSignal: nativeTimeout ? AbortSignal : {}, AbortController, console,
     mergeFinancialResults, fiscalYearFromPeriod, fiscalPeriodLabel, mergeOfficialStatements, translateText, readLanguage, saveLanguage, chartPoint, hitChart, stockIndicators,
-    extractStatement: async () => null, buildIncomeFlow, sankeyHubSize, sortIrDocuments, officialDocumentPeriod, buildCashFlow, window: { devicePixelRatio: ratio, setTimeout() {}, addEventListener() {},
+    extractStatement: extract, buildIncomeFlow, buildSegmentFlow, sankeyHubSize, sortIrDocuments, officialDocumentPeriod, buildCashFlow, window: { devicePixelRatio: ratio, setTimeout() {}, addEventListener() {},
       setInterval(fn, ms) { timers.set(ms, fn); } } });
-  const api = await vm.runInContext(`(async () => { ${source}\nreturn {state, elements, refreshCompany, refreshQuote, applyOfficialStatements, loadOfficialStatements, loadOfficialIrDocuments, renderDocuments, chartModels}; })()`, sandbox);
+  const api = await vm.runInContext(`(async () => { ${source}\nreturn {state, elements, refreshCompany, refreshQuote, applyOfficialStatements, loadOfficialStatements, loadOfficialIrDocuments, loadActiveSegmentReport, renderDocuments, chartModels}; })()`, sandbox);
   return { ...api, rows, nodes, timers, document, calls, buttons, setHandler(fn) { handler = fn; } };
 }
+
+test("JTへ切り替えると2914.Tと公式原本を取得し、DB未登録でも決算書を表示する", async () => {
+  const app = await setup();
+  const manifest = JSON.parse(await readFile(new URL("./statement-data.json", import.meta.url), "utf8"));
+  app.setHandler(url => {
+    if (url.pathname.startsWith("/api/") && url.searchParams.has("symbol")) {
+      assert.equal(url.searchParams.get("symbol"), "2914.T");
+    }
+    if (["/api/official-reports", "/api/ir-documents"].includes(url.pathname)) {
+      assert.equal(url.searchParams.get("company"), "jt");
+      return Response.json({ documents: manifest.documentsByCompany.jt, reports: manifest.reportsByCompany.jt, stale: false });
+    }
+    return null;
+  });
+  app.buttons.find(button => button.dataset.company === "jt").listeners.click();
+  for (let i = 0; i < 20; i++) await tick();
+  assert.equal(app.state.companyCode, "jt");
+  assert.ok(app.state.results.length >= 18);
+  const latest = app.state.results.at(-1);
+  assert.equal(latest.periodEnd, "2026-06-30");
+  assert.equal(latest.revenue, manifest.reportsByCompany.jt.at(-1).revenue - manifest.reportsByCompany.jt.at(-2).revenue);
+  assert.match(app.elements.documentsBody.innerHTML, /www.jti.co.jp/);
+});
+
+test("追加した自動車9社を切り替え、会社ごとの証券コード・解析済み原本・表示期を使う", async () => {
+  const manifest=JSON.parse(await readFile(new URL('./statement-data.json',import.meta.url),'utf8'));
+  const config=JSON.parse(await readFile(new URL('./config.json',import.meta.url),'utf8'));
+  const app=await setup();
+  for(const company of config.additionalCompanies.filter(row=>row.code!=='jt')) {
+    app.setHandler(url=>{
+      if(url.pathname.startsWith('/api/') && url.searchParams.has('symbol')) assert.equal(url.searchParams.get('symbol'),company.stock_code+'.T');
+      if(['/api/official-reports','/api/ir-documents'].includes(url.pathname)) {
+        assert.equal(url.searchParams.get('company'),company.code);
+        return Response.json({documents:manifest.documentsByCompany[company.code],reports:manifest.reportsByCompany[company.code],stale:false});
+      }
+      return null;
+    });
+    app.buttons.find(button=>button.dataset.company===company.code).listeners.click();
+    for(let i=0;i<20;i++)await tick();
+    assert.equal(app.state.companyCode,company.code);
+    assert.equal(app.state.results.at(-1)?.periodEnd,manifest.reportsByCompany[company.code].at(-1).periodEnd,company.code);
+    assert.ok(app.state.results.length>0,company.code);
+  }
+});
 
 test("科目が多くても合流部の太さを保ち、入出の帯の太さが総額に一致する", async () => {
   const app=await setup();
@@ -370,6 +459,91 @@ test("サンキーの読み上げ説明に収入と支出を表示し、四半�
   app.elements.quarterSelect.listeners.change({ target: { value: "old" } });
   assert.notEqual(canvas.ariaLabel, previous);
   assert.ok(!canvas.ariaLabel.includes("???"));
+});
+
+test("年度累計チェックは表示内容の右側にあり、内訳表からなくなった", async () => {
+  const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
+  const controlStart = html.indexOf('<div class="flow-mode-control">');
+  const controlEnd = html.indexOf("</div>", controlStart);
+  const controls = html.slice(controlStart, controlEnd);
+  const statementStart = html.indexOf('<div class="statement-heading">');
+  const statementEnd = html.indexOf("</div>", statementStart);
+  const statementHeading = html.slice(statementStart, statementEnd);
+  assert.ok(controls.indexOf("</select>") < controls.indexOf('id="cumulative-flow"'));
+  assert.match(controls, /年度累計で表示/);
+  assert.doesNotMatch(statementHeading, /cumulative-flow|この決算書の期間をサンキーに表示/);
+});
+
+test("年度累計チェックは選択期までの累計に切り替え、原本がなければ四半期を合算する", async () => {
+  const app = await setup();
+  const first = { id:"q1", fiscalYear:2026, quarter:1, periodStart:"2026-04-01", periodEnd:"2026-06-30",
+    revenue:100, operatingCost:80, operatingIncome:20, pretaxIncome:20, netIncome:10 };
+  const second = { id:"q2", fiscalYear:2026, quarter:2, periodStart:"2026-07-01", periodEnd:"2026-09-30",
+    revenue:200, operatingCost:150, operatingIncome:50, pretaxIncome:50, netIncome:30 };
+  app.state.results = [first, second];
+  app.state.activeId = second.id;
+  app.state.statementSelectedEnd = first.periodEnd;
+  app.state.officialReportsByCompany.toyota = [
+    { ...first, basis:"quarter", statementRows:[], sourcePages:[] },
+    { ...second, basis:"cumulative", periodStart:first.periodStart, revenue:350, operatingCost:270,
+      operatingIncome:80, pretaxIncome:80, netIncome:50, statementRows:[], sourcePages:[] },
+  ];
+  const checkbox = app.elements.cumulativeFlow;
+  checkbox.listeners.change({ target:{ checked:false } });
+  const quarterRevenue = app.elements.annualRevenue.textContent;
+  assert.match(app.elements.flowPeriod.textContent, /単独四半期/);
+  checkbox.listeners.change({ target:{ checked:true } });
+  assert.match(app.elements.flowPeriod.textContent, /累計/);
+  assert.notEqual(app.elements.annualRevenue.textContent, quarterRevenue);
+
+  app.state.officialReportsByCompany.toyota = [];
+  checkbox.listeners.change({ target:{ checked:true } });
+  assert.equal(app.elements.annualRevenue.textContent, "+3億円");
+});
+
+test("セクター別表示は公式セグメント収入と計算費用をサンキーに描く", async () => {
+  const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
+  assert.match(html, /<option value="sector" data-language>セクター別<\/option>/);
+  const app = await setup();
+  const active = app.state.results.find(row => row.id === app.state.activeId);
+  active.segmentRows = [
+    {label:"自動車",revenue:1000,profit:250,page:9},
+    {label:"金融",revenue:300,profit:80,page:9},
+  ];
+  app.nodes.get("#flow-mode").listeners.change({target:{value:"sector"}});
+  const canvas = app.nodes.get("#sankey-chart");
+  assert.match(app.nodes.get("#flow-title").textContent, /セクター別/);
+  assert.match(canvas.ariaLabel, /自動車 \/ セグメント収入/);
+  assert.match(canvas.ariaLabel, /金融 \/ セグメント費用/);
+  assert.match(app.elements.previousCashAndCashEquivalents.textContent, /13億円/);
+  assert.match(app.elements.annualRevenue.textContent, /9億円/);
+  assert.match(app.elements.annualOperatingCost.textContent, /3億円/);
+});
+
+test("セクター別で公式PDFを解析し、累計セグメントを単独四半期へ変換する", async () => {
+  const url = "https://official.test/segments.pdf";
+  const first = {id:"q1",companyCode:"toyota",fiscalYear:2026,quarter:1,periodStart:"2026-04-01",periodEnd:"2026-06-30",
+    basis:"quarter",revenue:100,operatingCost:80,operatingIncome:20,pretaxIncome:20,netIncome:10,statementRows:[],
+    sourceUrl:"https://official.test/q1.pdf",sourcePages:[9],segmentRows:[{label:"自動車",revenue:100,profit:20,page:9}]};
+  const second = {id:"q2",companyCode:"toyota",fiscalYear:2026,quarter:2,periodStart:"2026-04-01",periodEnd:"2026-09-30",
+    basis:"cumulative",revenue:250,operatingCost:190,operatingIncome:60,pretaxIncome:60,netIncome:40,statementRows:[],
+    sourceUrl:url,sourcePages:[9],segmentRows:[{label:"自動車",revenue:250,profit:60,page:9}]};
+  const app = await setup({extract:async()=>second});
+  const firstQuarter = {...first,id:"q1-result"};
+  const secondQuarter = {...second,id:"q2-result",basis:"quarter-difference",periodStart:"2026-07-01",revenue:150,
+    operatingCost:110,operatingIncome:40,pretaxIncome:40,netIncome:30,segmentRows:undefined};
+  app.state.results = [firstQuarter,secondQuarter];
+  app.state.resultsByCompany.toyota = app.state.results;
+  app.state.activeId = secondQuarter.id;
+  app.state.flowMode = "sector";
+  app.state.officialReportsByCompany.toyota = [first,{...second,segmentRows:[]}];
+  app.setHandler(request => request.pathname === "/api/official-reports"
+    ? Response.json({documents:[{url,fiscalYear:2026,quarter:2}],reports:[]})
+    : request.pathname === "/api/report-pdf" ? new Response("pdf") : null);
+  assert.equal(await app.loadActiveSegmentReport(),true);
+  assert.equal(app.state.results.find(row=>row.quarter===2).segmentRows[0].revenue,150);
+  assert.equal(app.state.officialReportsByCompany.toyota.find(row=>row.periodEnd===second.periodEnd).segmentRows[0].revenue,250);
+  assert.ok(app.calls.includes("/api/report-pdf"));
 });
 
 test("2022年度までの事前解析履歴をすべて反映し、古い年度を選択してもPDFを端末で再解析しない", async () => {

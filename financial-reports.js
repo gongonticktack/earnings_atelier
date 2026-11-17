@@ -3,6 +3,79 @@ const finite = Number.isFinite;
 const compact = (text) => text.normalize("NFKC").replace(/[\s|]/g, "");
 
 /**
+ * 概要: セグメント情報の表から、収入とセグメント利益が明示された事業行を読み取ります。
+ * 引数: pages - ページ番号と行配列を持つPDFページ。
+ * 戻り値: 百万円単位の事業セグメント配列。表の形式を確定できない場合は空配列。
+ */
+function parseSegmentRows(pages, period) {
+  const rows = [];
+  const amount = String.raw`(?:\([\d,]+(?:\.\d+)?\)|[△▲−-]?\d[\d,]*(?:\.\d+)?)`;
+  if (period) {
+    const [year, month, day] = period.periodEnd.split("-").map(Number);
+    const periodDate = `${year}年${month}月${day}日`;
+    for (const page of pages) {
+      const text = compact(page.lines.join(" "));
+      if (!text.includes(compact(periodDate)) || !/報告セグメント/.test(text)
+          || !/外部収益/.test(text) || !/調整後営業利益/.test(text) || !/百万円/.test(text)) continue;
+      const sectionStart = page.lines.findIndex((line) => compact(line).includes("報告セグメント"));
+      const unitIndex = page.lines.findIndex((line, index) => index > sectionStart && /百万円/.test(compact(line)));
+      if (sectionStart < 0 || unitIndex < 0) continue;
+      const segmentNames = page.lines.slice(sectionStart + 1, unitIndex).map((line) => {
+        const parts = line.normalize("NFKC").trim().split(/\s+/);
+        const totalIndex = parts.indexOf("計");
+        return totalIndex > 1 ? parts.slice(0, totalIndex) : [];
+      }).find((names) => names.length > 0);
+      if (!segmentNames) continue;
+      const parseCells = (pattern) => {
+        const line = page.lines.find((candidate) => pattern.test(candidate.normalize("NFKC").trim()));
+        if (!line) return null;
+        const values = line.normalize("NFKC").trim().replace(pattern, "").trim().split(/\s+/);
+        if (values.length < segmentNames.length) return null;
+        return values.slice(0, segmentNames.length).map((value) => {
+          if (/^[－―—-]$/.test(value)) return null;
+          if (!new RegExp(`^${amount}$`).test(value)) return null;
+          return value.startsWith("(") ? -Number(value.slice(1, -1).replaceAll(",", ""))
+            : Number(value.replace(/[△▲−]/, "-").replaceAll(",", ""));
+        });
+      };
+      const revenues = parseCells(/^外部収益\s+/);
+      const profits = parseCells(/^調整後営業利益(?:\(注\d+\))?\s*/);
+      if (!revenues || !profits) continue;
+      for (let index = 0; index < segmentNames.length; index++) {
+        const revenue = revenues[index];
+        const profit = profits[index];
+        if (!segmentNames[index] || !finite(revenue) || revenue <= 0 || !finite(profit)) continue;
+        rows.push({ label: compact(segmentNames[index]), revenue, profit, page: page.number });
+      }
+    }
+    if (rows.length) return rows;
+  }
+  for (const page of pages) {
+    const text = compact(page.lines.join(" "));
+    if (!/セグメント情報|報告セグメント(?:ごとの|による)|事業セグメント/.test(text) || !/売上(?:高|収益)/.test(text)
+        || !/(?:セグメント(?:の)?(?:営業)?(?:利益|損失|損益)|報告セグメント.*(?:利益|損失))/.test(text)
+        || !/百万円/.test(text)) continue;
+    for (const raw of page.lines) {
+      const match = raw.normalize("NFKC").trim().match(
+        new RegExp(`^(.+?)\\s+(${amount})\\s+(${amount})$`),
+      );
+      if (!match) continue;
+      const label = compact(match[1]);
+      if (!/[一-龠ぁ-んァ-ヶA-Za-z]/.test(label)
+          || /売上|収益|利益|損失|調整|費用|^(?:合計|全社|消去|連結)/.test(label)) continue;
+      const parseAmount = (value) => value.startsWith("(") ? -Number(value.slice(1, -1).replaceAll(",", ""))
+        : Number(value.replace(/[△▲−]/, "-").replaceAll(",", ""));
+      const revenue = parseAmount(match[2]);
+      const profit = parseAmount(match[3]);
+      if (!finite(revenue) || revenue <= 0 || !finite(profit)) continue;
+      if (rows.some((row) => row.label === label)) continue;
+      rows.push({ label, revenue, profit, page: page.number });
+    }
+  }
+  return rows;
+}
+
+/**
  * 概要: PDFの文字座標を行ごとに並べ、前期と当期の列順を保存します。
  * 引数: items - PDF.jsの文字要素配列。
  * 戻り値: 上から下、左から右に並べた文字列の配列。
@@ -47,9 +120,9 @@ export function statementPeriod(pages) {
 }
 
 /**
- * 概要: PDFの損益計算書とCF計算書から当期の実績・細目を読み取ります。単位・列を確定できない表は除外します。
+ * 概要: PDFの損益計算書・CF計算書・事業セグメント表から当期の実績・細目を読み取ります。利益科目の折返し・括弧付き費用に対応し、1株利益・調整表は除外します。単位・列が不明な表は除外します。
  * 引数: pages - PDFページ。companyCode - 会社識別子。sourceUrl - 原本URL。expectedCode - 照合する証券コード（任意）。
- * 戻り値: 出典・ページ・開示されたCFを含む累計または四半期業績。対応外の表はnull。
+ * 戻り値: 出典・ページ・開示されたCFとセグメント情報を含む累計または四半期業績。対応外の表はnull。
  */
 export function parseStatementPages(pages, companyCode, sourceUrl, expectedCode) {
   const period = statementPeriod(pages);
@@ -77,13 +150,15 @@ export function parseStatementPages(pages, companyCode, sourceUrl, expectedCode)
     let preceding = "";
     let group = null;
     const pageLines = [page, pages[index + 1]].filter(Boolean).flatMap((source) => source.lines.map((raw) => ({ raw, number: source.number })));
-    for (const { raw, number } of pageLines) {
+    for (let { raw, number } of pageLines) {
+      if (/^[\d,△▲−－―—\s-]+$/.test(raw) && /利益|損失/.test(preceding)) raw = `${preceding} ${raw}`;
       const line = compact(raw);
       if (rows.length && /包括利益計算書/.test(line)) break;
       if (rows.length && /^(その他の包括利益|純損益に振替えられる)/.test(line)) break;
       if (rows.length && /貸借対照表|財政状態計算書|キャッシュ.*フロー計算書/.test(line)) break;
+      if (rows.length && /^(?:1株当たり|基本的1株当たり|希薄化後1株当たり)|営業利益から調整後営業利益/.test(line)) break;
       if (/単位[:：]?円/.test(line)) break;
-      const match = raw.normalize("NFKC").trim().match(/^(.+?)\s+((?:[△▲−-]?\d[\d,]*(?:\.\d+)?|[－―—-])(?:\s+(?:[△▲−-]?\d[\d,]*(?:\.\d+)?|[－―—-])){1,6})$/);
+      const match = raw.normalize("NFKC").replace(/\(([\d,]+(?:\.\d+)?)\)/g, "-$1").trim().match(/^(.+?)\s+((?:[△▲−-]?\d[\d,]*(?:\.\d+)?|[－―—-])(?:\s+(?:[△▲−-]?\d[\d,]*(?:\.\d+)?|[－―—-])){1,6})$/);
       if (!match) {
         if (!/\d/.test(line)) preceding = line;
         if (/^(販売費及び一般管理費|営業外収益|営業外費用|特別利益|特別損失|投資損益|収益|原価)$/.test(line)) group = line;
@@ -123,8 +198,9 @@ export function parseStatementPages(pages, companyCode, sourceUrl, expectedCode)
     const reportedCost = pick(/^(経常費用|営業費用|営業費用合計)$/);
     return { ...period, companyCode, revenue, operatingIncome, pretaxIncome, netIncome,
       operatingCost: reportedCost ?? revenue - (operatingIncome ?? pretaxIncome), statementRows: rows,
+      segmentRows: parseSegmentRows(pages, period),
       cashFlow: parseCashFlowPages(pages, period),
-      signedExpenses: /△は[^)）]{0,60}費用/.test(text) || (pick(/^(売上原価|原価|原価合計)$/) < 0 && pick(/^販売費及び一般管理費$/) < 0),
+      signedExpenses: /△は[^)）]{0,60}費用/.test(text) || (pick(/^(売上原価|原価|原価合計)$/) < 0 && pick(/^販売費及び一般管理費(?:等)?$/) < 0),
       operatingCostLabel: reportedCost !== null ? (rows.some((row) => row.label === "経常費用") ? "決算書の経常費用" : "決算書の営業費用")
         : operatingIncome !== null ? "売上収益−営業利益（差額）" : "収益−税引前利益（差額）",
       sourceName: "公式決算書", sourceUrl, sourcePages: [...new Set(rows.map((row) => row.page))],
@@ -166,7 +242,7 @@ export async function extractStatement(bytes, companyCode, sourceUrl, expectedCo
 /**
  * 概要: 累計から直前の累計を引いて単独四半期を作ります。基準期間がない累計は変換しません。
  * 引数: reports - 抽出した公式決算書の配列。
- * 戻り値: 根拠を保持した単独四半期配列。
+ * 戻り値: 損益・セグメントの根拠を保持した単独四半期配列。
  */
 export function quarterlyStatements(reports) {
   return reports.flatMap((report) => {
@@ -178,10 +254,14 @@ export function quarterlyStatements(reports) {
       const difference = (key) => finite(report[key]) && finite(prior[key]) ? report[key] - prior[key] : null;
       const key = (row) => `${row.group ?? ""}:${row.label}`;
       const precedingLabels = new Map(prior.statementRows.map((row) => [key(row), row]));
+      const precedingSegments = new Map((prior.segmentRows ?? []).map((row) => [row.label, row]));
       result = { ...report, revenue: difference("revenue"), operatingIncome: difference("operatingIncome"),
         pretaxIncome: difference("pretaxIncome"), operatingCost: difference("operatingCost"), netIncome: difference("netIncome"),
         statementRows: report.statementRows.filter((row) => precedingLabels.has(key(row)))
           .map((row) => ({ ...row, value: row.value - precedingLabels.get(key(row)).value })),
+        segmentRows: (report.segmentRows ?? []).filter((row) => precedingSegments.has(row.label))
+          .map((row) => ({ ...row, revenue: row.revenue - precedingSegments.get(row.label).revenue,
+            profit: row.profit - precedingSegments.get(row.label).profit })),
         sourceUrls: [report.sourceUrl, prior.sourceUrl], basis: "quarter-difference", cumulativeStart: report.periodStart,
         periodStart: new Date(Date.parse(prior.periodEnd) + 86400000).toISOString().slice(0, 10) };
     }

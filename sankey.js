@@ -40,7 +40,41 @@ export function buildIncomeFlow(result, profit) {
 }
 
 /**
- * 概要: 公式損益計算書の細目を収入・支出に分類し、未分類の差額を明示して金額を保ちます。
+ * 概要: 事業セグメントごとの収入を、計算した費用と利益へ配分します。
+ * 引数: segments - セグメント名・収入・セグメント利益の配列。金額は百万円単位。
+ * 戻り値: 収支が一致するサンキー流量。利用可能なセグメントがなければnull。
+ */
+export function buildSegmentFlow(segments) {
+  if (!Array.isArray(segments)) return null;
+  const sources = [];
+  const targets = [];
+  let totalRevenue = 0;
+  let totalExpenses = 0;
+  let totalProfit = 0;
+  for (const segment of segments) {
+    if (typeof segment?.label !== "string" || !segment.label || !Number.isFinite(segment.revenue)
+        || segment.revenue <= 0 || !Number.isFinite(segment.profit)) continue;
+    const expenses = segment.revenue - segment.profit;
+    sources.push({ label:`${segment.label} / セグメント収入`, value:segment.revenue, kind:"revenue" });
+    totalRevenue += segment.revenue;
+    totalProfit += segment.profit;
+    if (expenses > 0) {
+      targets.push({ label:`${segment.label} / セグメント費用（計算）`, value:expenses, kind:"expense" });
+      totalExpenses += expenses;
+    } else if (expenses < 0) {
+      sources.push({ label:`${segment.label} / 収入以外の利益`, value:-expenses, kind:"other" });
+      totalExpenses += expenses;
+    }
+    if (segment.profit > 0) targets.push({ label:`${segment.label} / セグメント利益`, value:segment.profit, kind:"profit" });
+    else if (segment.profit < 0) sources.push({ label:`${segment.label} / セグメント損失（不足額）`, value:-segment.profit, kind:"loss" });
+  }
+  if (!sources.length || !targets.length) return null;
+  return { sources, targets, total:sources.reduce((sum, node) => sum + node.value, 0),
+    totalRevenue, totalExpenses, totalProfit };
+}
+
+/**
+ * 概要: 公式損益計算書の細目を収入・支出に分類し、販管費等とその他営業収益も含め、未分類の差額を明示して金額を保ちます。
  * 引数: result - 主要値と原本の科目配列を持つ業績。
  * 戻り値: 詳細サンキーのモデル。細目がない場合はnull。
  */
@@ -78,7 +112,7 @@ export function detailedIncomeFlow(result) {
     else if (row.group === "投資損益" && label !== "投資損益合計") effect = row.value;
     else if (row.group === "特別利益" && label !== "特別利益合計") effect = row.value;
     else if (row.group === "特別損失" && label !== "特別損失合計") effect = expenseEffect;
-    else if (/^(売上原価|原価|原価合計|商品販売等に係る原価|役務提供及びロイヤルティ取引に係る原価|販売費及び一般管理費|販売費及び一般管理費合計|販売費および一般管理費|販売費一般管理費|金融事業に係る金融費用|資金調達費用|役務取引等費用|特定取引費用|その他業務費用|営業経費|その他経常費用|人件費|経費|減価償却費|固定資産除却費|減損損失|租税公課|貸倒損失)$/.test(label)) {
+    else if (/^(売上原価|原価|原価合計|商品販売等に係る原価|役務提供及びロイヤルティ取引に係る原価|販売費及び一般管理費(?:等)?|販売費及び一般管理費合計|販売費および一般管理費|販売費一般管理費|金融事業に係る金融費用|資金調達費用|役務取引等費用|特定取引費用|その他業務費用|営業経費|その他経常費用|人件費|経費|減価償却費|固定資産除却費|減損損失|租税公課|貸倒損失)$/.test(label)) {
       effect = expenseEffect;
     } else if (/^(その他の金融費用|金融費用|財務費用|その他の費用|特別損失|支払利息|為替差損|雑損失)$/.test(label)) {
       effect = result.signedExpenses ? row.value : -Math.abs(row.value);
@@ -88,7 +122,7 @@ export function detailedIncomeFlow(result) {
       const tax = /^(法人所得税費用|法人所得税)$/.test(label);
       effect = tax && result.signedExpenses ? row.value : -row.value;
     } else if (/^その他の営業損/.test(label)) effect = -row.value;
-    else if (/^(その他の金融収益|金融収益|その他の収益|持分法による投資|為替差損益|その他[<（(]|特別利益|投資損益合計|その他の損益|デリバティブ関連損益|SVFの外部投資家持分|受取利息|受取配当金|為替差益|雑収入|有価証券損益|固定資産に係る損益|固定資産除・売却損益|固定資産減損損失及び戻入)/.test(label)) {
+    else if (/^(その他の営業収益|その他の金融収益|金融収益|その他の収益|持分法による投資|為替差損益|その他[<（(]|特別利益|投資損益合計|その他の損益|デリバティブ関連損益|SVFの外部投資家持分|受取利息|受取配当金|為替差益|雑収入|有価証券損益|固定資産に係る損益|固定資産除・売却損益|固定資産減損損失及び戻入)/.test(label)) {
       effect = row.value;
     }
     if (effect !== undefined) { addEffect(label === "その他" && row.group ? `${row.group} / その他` : label, effect, "other"); count++; }

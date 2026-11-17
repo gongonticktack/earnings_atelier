@@ -1,10 +1,22 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {parseCashFlowPages,buildCashFlow} from './cash-flow.js';
+import {parseCashFlowPages,buildCashFlow,cashFlowAdjustments} from './cash-flow.js';
 import {readFile} from 'node:fs/promises';
 
 const actual=JSON.parse(await readFile(new URL('./test-fixtures/toyota-cash-flow.json',import.meta.url),'utf8'));
 const period={periodStart:'2025-04-01',periodEnd:'2026-03-31',basis:'cumulative'};
+
+test('子会社株式の取得や売却損をCF外の調整へ重複計上せず、現金の換算と連結範囲変更を保持する',()=>{
+ const rows=[
+  {label:'売却目的で保有する処分グループの売却損',value:468},
+  {label:'連結範囲の変更を伴わない子会社株式の取得による支出',value:-6067},
+  {label:'財務活動によるキャッシュフロー',value:-60839},
+  {label:'現金及び現金同等物に係る換算変動の影響額',value:554},
+  {label:'連結の範囲の変更に伴う現金及び現金同等物の増減額',value:6713},
+  {label:'連結子会社の決算期変更に伴う現金及び現金同等物',value:1018},
+ ];
+ assert.deepEqual(cashFlowAdjustments(rows),rows.slice(3));
+});
 test('トヨタ公式通期原本の当期CF・現金残高・為替・振替を読み取り、丸め差を明記する',()=>{
  const cash=parseCashFlowPages([actual],period);
  assert.deepEqual([cash.opening,cash.operating,cash.investing,cash.financing,cash.closing],[8982404,5472920,-1520307,-536659,12659622]);

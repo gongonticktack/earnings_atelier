@@ -1,5 +1,5 @@
 import { mergeFinancialResults, fiscalYearFromPeriod, fiscalPeriodLabel } from "./market.js";
-import { buildIncomeFlow, sankeyHubSize } from "./sankey.js";
+import { buildIncomeFlow, buildSegmentFlow, sankeyHubSize } from "./sankey.js";
 import { sortIrDocuments, officialDocumentPeriod } from "./report-metadata.js";
 import { buildCashFlow } from "./cash-flow.js";
 import { extractStatement, mergeOfficialStatements } from "./financial-reports.js";
@@ -72,6 +72,46 @@ async function fetchSupabaseRows(table, query = {}) {
 
 // サイドバーに出す会社の基本情報です。画面表示や株価取得で同じ情報を使います。
 const companies = {
+  nissan: {
+    code: "nissan", name: "NISSAN MOTOR CO., LTD.", sourceName: "NISSAN IR",
+    sourcePage: "https://www.nissan-global.com/JP/IR/FINANCIAL_RESULTS/", stockSymbol: "7201.T",
+  },
+  honda: {
+    code: "honda", name: "HONDA MOTOR CO., LTD.", sourceName: "HONDA IR",
+    sourcePage: "https://global.honda/jp/investors/library/financialresult.html", stockSymbol: "7267.T",
+  },
+  suzuki: {
+    code: "suzuki", name: "SUZUKI MOTOR CORPORATION", sourceName: "SUZUKI IR",
+    sourcePage: "https://www.suzuki.co.jp/ir/library/financialaffairs/", stockSymbol: "7269.T",
+  },
+  mazda: {
+    code: "mazda", name: "MAZDA MOTOR CORPORATION", sourceName: "MAZDA IR",
+    sourcePage: "https://www.mazda.com/ja/investors/library/result/", stockSymbol: "7261.T",
+  },
+  subaru: {
+    code: "subaru", name: "SUBARU CORPORATION", sourceName: "SUBARU IR",
+    sourcePage: "https://www.subaru.co.jp/ir/library/results.html", stockSymbol: "7270.T",
+  },
+  "mitsubishi-motors": {
+    code: "mitsubishi-motors", name: "MITSUBISHI MOTORS CORPORATION", sourceName: "MITSUBISHI MOTORS IR",
+    sourcePage: "https://www.mitsubishi-motors.com/jp/investors/library/earning.html", stockSymbol: "7211.T",
+  },
+  isuzu: {
+    code: "isuzu", name: "ISUZU MOTORS LIMITED", sourceName: "ISUZU IR",
+    sourcePage: "https://www.isuzu-global.com/ja/investor/financial/results.html", stockSymbol: "7202.T",
+  },
+  archion: {
+    code: "archion", name: "ARCHION CORPORATION", sourceName: "ARCHION IR",
+    sourcePage: "https://archion.co.jp/ir/library/financial-results/", stockSymbol: "543A.T",
+  },
+  "nissan-shatai": {
+    code: "nissan-shatai", name: "NISSAN SHATAI CO., LTD.", sourceName: "NISSAN SHATAI IR",
+    sourcePage: "https://www.nissan-shatai.co.jp/IR/LIBRARY/FINANCIAL/", stockSymbol: "7222.T",
+  },
+  jt: {
+    code: "jt", name: "JAPAN TOBACCO INC.", sourceName: "JT IR",
+    sourcePage: "https://www.jti.co.jp/investors/library/result/", stockSymbol: "2914.T",
+  },
   kioxia: {
     code: "kioxia", name: "KIOXIA HOLDINGS CORPORATION", sourceName: "KIOXIA IR",
     sourcePage: "https://www.kioxia-holdings.com/ja-jp/ir/library/data.html", stockSymbol: "285A.T",
@@ -178,6 +218,9 @@ const companies = {
 // DBからまだ読めないときに使う予備データです。画面が空っぽにならないための保険です。
 // 公式PDFは累計で出ることが多いので、ここでは四半期ごとの数字に直した値を置いています。
 const fallbackResults = {
+  nissan: [], honda: [], suzuki: [], mazda: [], subaru: [],
+  "mitsubishi-motors": [], isuzu: [], archion: [], "nissan-shatai": [],
+  jt: [],
   kioxia: [],
   toyota: [
   {
@@ -452,6 +495,7 @@ const state = {
   sankeyExpanded: false,
   statementSelectedEnd: null,
   refreshingCompanies: new Set(),
+  completedCompanies: new Set(),
   databaseError: null,
   stockChartStatus: "idle",
   stockChartError: "",
@@ -460,6 +504,9 @@ const state = {
 
 // HTMLの部品を先に探しておきます。あとで何度もdocument.querySelectorを書かなくて済みます。
 const elements = {
+  companyData: document.querySelector('#company-data'),
+  companyLoading: document.querySelector('#company-loading'),
+  loadingCompanyName: document.querySelector('#loading-company-name'),
   stockIndicatorStatus: document.querySelector("#stock-indicator-status"),
   chartTooltip: document.querySelector("#chart-tooltip"),
   chartTooltipContent: document.querySelector("#chart-tooltip-content"),
@@ -1070,10 +1117,16 @@ function drawSankeyChart() {
   const canvas = document.querySelector("#sankey-chart");
   const result = flowResult();
   const cashMode = state.flowMode === 'cash';
-  const flow = cashMode ? buildCashFlow(result?.cashFlow) : buildIncomeFlow(result, result ? profitValue(result) : null);
+  const sectorMode = state.flowMode === 'sector';
+  const flow = cashMode ? buildCashFlow(result?.cashFlow)
+    : sectorMode ? buildSegmentFlow(result?.segmentRows) : buildIncomeFlow(result, result ? profitValue(result) : null);
   if (!flow || !flow.total) {
-    canvas.ariaLabel = t(cashMode ? "この決算書のキャッシュフローは未開示・未取得です" : "収入・支出のサンキーグラフ: 表示できる業績データがありません");
-    drawEmptyChart(canvas, cashMode ? "この決算書のキャッシュフローは未開示・未取得です" : result ? "収入・支出の内訳を表示できません" : "四半期データ未登録");
+    const emptyMessage = cashMode ? "この決算書のキャッシュフローは未開示・未取得です"
+      : sectorMode ? "セグメント情報は未開示・未取得です"
+      : result ? "収入・支出の内訳を表示できません" : "四半期データ未登録";
+    canvas.ariaLabel = t(cashMode ? emptyMessage : sectorMode ? "セグメント情報は未開示・未取得です"
+      : "収入・支出のサンキーグラフ: 表示できる業績データがありません");
+    drawEmptyChart(canvas, emptyMessage);
     return;
   }
   const nodeCount = Math.max(flow.sources.length, flow.targets.length);
@@ -1139,11 +1192,11 @@ function drawSankeyChart() {
   ctx.fillStyle = "#9b998f";
   ctx.font = '600 11px "Noto Sans JP"';
   ctx.textAlign = "left";
-  ctx.fillText(t(cashMode ? "期首現金・流入" : "収入・調整"), 18, 28);
+  ctx.fillText(t(cashMode ? "期首現金・流入" : sectorMode ? "事業セグメント収入" : "収入・調整"), 18, 28);
   ctx.textAlign = "center";
-  ctx.fillText(t(cashMode ? "現金の配分" : "損益の配分"), hubX + hub.width / 2, 28);
+  ctx.fillText(t(cashMode ? "現金の配分" : sectorMode ? "セグメント別配分" : "損益の配分"), hubX + hub.width / 2, 28);
   ctx.textAlign = "right";
-  ctx.fillText(t(cashMode ? "流出・期末現金" : "支出・利益"), width - 18, 28);
+  ctx.fillText(t(cashMode ? "流出・期末現金" : sectorMode ? "事業セグメント費用・利益" : "支出・利益"), width - 18, 28);
   const drawNode = (node, left) => {
     ctx.fillStyle = colors[node.kind];
     ctx.fillRect(node.x, node.y, nodeWidth, node.height);
@@ -1167,7 +1220,8 @@ function drawSankeyChart() {
   };
   sources.forEach((node) => drawNode(node, true));
   targets.forEach((node) => drawNode(node, false));
-  canvas.ariaLabel = t(cashMode ? "キャッシュフローのサンキーグラフ。" : "収入・支出のサンキーグラフ。") + [...flow.sources, ...flow.targets]
+  canvas.ariaLabel = t(cashMode ? "キャッシュフローのサンキーグラフ。"
+    : sectorMode ? "セグメント別収入・支出のサンキーグラフ。" : "収入・支出のサンキーグラフ。") + [...flow.sources, ...flow.targets]
     .map((node) => t(node.label) + ": " + formatFlowAmount(node.value)).join(state.language === "en" ? "; " : "。");
 }
 
@@ -1206,16 +1260,25 @@ function flowLabelLines(context, label, maxWidth) {
 function renderAnnualFlow() {
   const result = flowResult();
   const cashMode=state.flowMode==='cash';
-  document.querySelector('#flow-title').textContent=t(cashMode?'キャッシュフローのサンキーグラフ':'収入と支出のサンキーグラフ');
-  document.querySelector('#flow-description').textContent=t(cashMode?'期首現金と流入から、流出と期末現金へのつながりを表示します。帯の太さは金額に比例します。':'売上収益が費用・税金等・純利益へ配分される流れを表示します。帯の太さは金額に比例します。');
-  document.querySelector('#flow-note').textContent=t(cashMode?'営業・投資・財務CFは各活動の純額です。増加は左、減少は右に表示します。減価償却など現金を伴わない調整を、現金収入として重複計上しません。期首残高＋各CF＋為替等の調整＝期末残高です。':'この図は損益のつながりを示します。増益となる税金・その他は左側の流入、純損失は不足額として表示します。');
-  const captions=cashMode?['配分総額','期首現金及び現金同等物','営業キャッシュフロー','投資キャッシュフロー','財務キャッシュフロー','為替・その他の調整','期末現金及び現金同等物']:['配分総額','売上収益','営業費用・費用等','費用差引後','税金・その他','利益率','純利益'];
+  const sectorMode=state.flowMode==='sector';
+  document.querySelector('#flow-title').textContent=t(cashMode?'キャッシュフローのサンキーグラフ':sectorMode?'セクター別収入・支出のサンキーグラフ':'収入と支出のサンキーグラフ');
+  document.querySelector('#flow-description').textContent=t(cashMode?'期首現金と流入から、流出と期末現金へのつながりを表示します。帯の太さは金額に比例します。':sectorMode?'事業セグメントごとの収入と費用・利益の流れを表示します。帯の太さは金額に比例します。':'売上収益が費用・税金等・純利益へ配分される流れを表示します。帯の太さは金額に比例します。');
+  document.querySelector('#flow-note').textContent=t(cashMode?'営業・投資・財務CFは各活動の純額です。増加は左、減少は右に表示します。減価償却など現金を伴わない調整を、現金収入として重複計上しません。期首残高＋各CF＋為替等の調整＝期末残高です。':sectorMode?'セグメント費用はセグメント収入からセグメント利益を差し引いた計算値です。':'この図は損益のつながりを示します。増益となる税金・その他は左側の流入、純損失は不足額として表示します。');
+  const captions=cashMode?['配分総額','期首現金及び現金同等物','営業キャッシュフロー','投資キャッシュフロー','財務キャッシュフロー','為替・その他の調整','期末現金及び現金同等物']:sectorMode?['セグメント収入','セグメント費用（計算）','セグメント利益','','','','']:['配分総額','売上収益','営業費用・費用等','費用差引後','税金・その他','利益率','純利益'];
   captions.forEach((label,index)=>{document.querySelector(index===2?'#flow-cost-caption':`#flow-caption-${index}`).textContent=t(label);});
-  elements.cumulativeFlow.disabled=cashMode || !selectedStatement();
+  elements.cumulativeFlow.disabled=cashMode || !cumulativeFlowResult();
   if (cashMode) {
     const cash=result?.cashFlow;
     elements.flowPeriod.textContent=t(result?`${fiscalPeriodLabel(result)} / ${result.periodStart}〜${result.periodEnd} / ${result.basis==='cumulative'?'累計':'単独四半期'}`:'決算データ未登録');
     const values=cash?[buildCashFlow(cash)?.total,cash.opening,cash.operating,cash.investing,cash.financing,cash.adjustmentTotal+cash.residual,cash.closing]:[];
+    [elements.previousCashAndCashEquivalents,elements.annualRevenue,elements.annualOperatingCost,elements.investmentCashFlow,elements.financingCashFlow,elements.otherCashFlowAdjustment,elements.cashAndCashEquivalents]
+      .forEach((element,index)=>{element.textContent=t(Number.isFinite(values[index])?formatFlowAmount(values[index]):'開示なし');});
+    return;
+  }
+  if (sectorMode) {
+    const flow=buildSegmentFlow(result?.segmentRows);
+    elements.flowPeriod.textContent=t(result?`${fiscalPeriodLabel(result)} / ${result.periodStart??'期間開始不明'}〜${result.periodEnd} / ${result.basis==='cumulative'?'累計':'単独四半期'}`:'決算データ未登録');
+    const values=flow?[flow.totalRevenue,flow.totalExpenses,flow.totalProfit]:[];
     [elements.previousCashAndCashEquivalents,elements.annualRevenue,elements.annualOperatingCost,elements.investmentCashFlow,elements.financingCashFlow,elements.otherCashFlowAdjustment,elements.cashAndCashEquivalents]
       .forEach((element,index)=>{element.textContent=t(Number.isFinite(values[index])?formatFlowAmount(values[index]):'開示なし');});
     return;
@@ -1422,6 +1485,7 @@ function renderCompany() {
  * 戻り値: なし。
  */
 function render() {
+  renderCompanyLoading();
   renderLanguage();
   renderCompany();
   renderPicker();
@@ -1433,6 +1497,16 @@ function render() {
   renderLiveMarket();
   renderDataStatus();
   renderStatementDetails();
+}
+
+/** 概要: 選択企業の取得中は数値を隠し、GIFと読み込み状態を表示します。引数: なし。戻り値: なし。 */
+function renderCompanyLoading() {
+  const busy = state.refreshingCompanies.has(state.companyCode) || !state.completedCompanies.has(state.companyCode);
+  elements.companyData.hidden = busy;
+  elements.companyData.inert = busy;
+  elements.companyData.setAttribute('aria-busy', String(busy));
+  elements.companyLoading.hidden = !busy;
+  elements.loadingCompanyName.textContent = companies[state.companyCode].name;
 }
 
 /**
@@ -1448,13 +1522,55 @@ function selectedStatement() {
 }
 
 /**
- * 概要: サンキーで表示する単独四半期または明示選択した決算書の期間を返します。
+ * 概要: 選択中の四半期までの年度累計業績を返します。
  * 引数: なし。
- * 戻り値: 損益データ、またはundefined。
+ * 戻り値: 年度累計の公式決算書または集計業績。根拠が不足する場合はundefined。
+ */
+function cumulativeFlowResult() {
+  const current = activeResult();
+  if (!current || !Number.isInteger(current.quarter) || current.quarter < 1 || current.quarter > 4) return undefined;
+  const reports = state.officialReportsByCompany[state.companyCode] ?? [];
+  const report = reports.find((row) => row.fiscalYear === current.fiscalYear && row.quarter === current.quarter
+    && (row.basis === "cumulative" || current.quarter === 1 && row.basis === "quarter"));
+  if (report) return report;
+
+  const quarters = state.results.filter((row) => row.fiscalYear === current.fiscalYear && row.quarter <= current.quarter)
+    .sort((a, b) => a.quarter - b.quarter);
+  if (quarters.length !== current.quarter || quarters.some((row, index) => row.quarter !== index + 1)) return undefined;
+  const sum = (key) => quarters.every((row) => Number.isFinite(row[key]))
+    ? quarters.reduce((total, row) => total + row[key], 0) : null;
+  const firstQuarter = reports.find((row) => row.fiscalYear === current.fiscalYear && row.quarter === 1);
+  const segmentLabels = new Set(quarters.flatMap((row) => (row.segmentRows ?? []).map((segment) => segment.label)));
+  const segmentRows = [...segmentLabels].flatMap((label) => {
+    const values = quarters.map((row) => row.segmentRows?.find((segment) => segment.label === label));
+    if (!values.every((segment) => Number.isFinite(segment?.revenue) && Number.isFinite(segment?.profit))) return [];
+    return [{ ...values[0], revenue:values.reduce((sum, segment) => sum + segment.revenue, 0),
+      profit:values.reduce((sum, segment) => sum + segment.profit, 0) }];
+  });
+  return {
+    ...current,
+    revenue: sum("revenue"),
+    operatingCost: sum("operatingCost"),
+    operatingIncome: sum("operatingIncome"),
+    pretaxIncome: sum("pretaxIncome"),
+    netIncome: sum("netIncome"),
+    periodStart: quarters[0].periodStart ?? firstQuarter?.periodStart ?? null,
+    basis: "cumulative",
+    sourceName: "四半期実績の合算",
+    sourceUrl: undefined,
+    statementRows: undefined,
+    segmentRows,
+  };
+}
+
+/**
+ * 概要: サンキーで表示する年度累計または単独四半期の業績を返します。
+ * 引数: なし。
+ * 戻り値: 損益・CFデータ、またはundefined。
  */
 function flowResult() {
   if (state.flowMode==='cash') return selectedStatement();
-  return state.cumulativeFlow ? selectedStatement() ?? activeResult() : activeResult();
+  return state.cumulativeFlow ? cumulativeFlowResult() : activeResult();
 }
 
 /**
@@ -1468,7 +1584,7 @@ function renderStatementDetails() {
   elements.statementSelect.innerHTML = t(reports.map((row) => `<option value="${row.periodEnd}">${escapeHtml(fiscalPeriodLabel(row))} / ${row.periodEnd} / ${row.basis === "cumulative" ? "累計" : "第1四半期"}${row.cashFlow?' / CFあり':''}</option>`).join(""));
   elements.statementSelect.value = report?.periodEnd ?? "";
   elements.statementSelect.disabled = !report;
-  elements.cumulativeFlow.disabled = !report || state.flowMode==='cash';
+  elements.cumulativeFlow.disabled = state.flowMode==='cash' || !cumulativeFlowResult();
   elements.cumulativeFlow.checked = state.cumulativeFlow;
   document.querySelector('#statement-title').textContent=t(state.flowMode==='cash'?'決算書のキャッシュフロー内訳':'決算書の収入・支出内訳');
   if (!report) {
@@ -1516,12 +1632,24 @@ function applyOfficialStatements(companyCode) {
 }
 
 /**
- * 概要: 事前解析した公式内訳を優先し、未取得の原本だけブラウザで解析して更新します。
+ * 概要: 公式内訳の取得処理を企業ごとに共有し、原本の解析と統合まで待機します。
  * 引数: companyCode - 対象企業。force - PDFのブラウザ内解析キャッシュを無視するか。
  * 戻り値: 解析完了を示すPromise。
  */
-async function loadOfficialStatements(companyCode, force = false) {
-  if (state.officialReportLoading.has(companyCode)) { applyOfficialStatements(companyCode); return; }
+function loadOfficialStatements(companyCode, force = false) {
+  if (officialStatementRequests.has(companyCode)) return officialStatementRequests.get(companyCode);
+  const pending = performOfficialStatementsLoad(companyCode, force)
+    .finally(() => officialStatementRequests.delete(companyCode));
+  officialStatementRequests.set(companyCode, pending);
+  return pending;
+}
+
+const officialStatementRequests = new Map();
+const segmentReportRequests = new Map();
+const checkedSegmentSources = new Set();
+
+/** 概要: 公式決算を取得して統合し、失敗も取得状態へ保存します。引数: companyCode - 対象企業、force - キャッシュを無視するか。戻り値: 取得完了のPromise。 */
+async function performOfficialStatementsLoad(companyCode, force = false) {
   state.officialReportLoading.add(companyCode);
   delete state.officialReportErrorsByCompany[companyCode];
   if (state.companyCode === companyCode) renderStatementDetails();
@@ -1567,6 +1695,78 @@ async function loadOfficialStatements(companyCode, force = false) {
     state.officialReportChecked.add(companyCode);
     if (state.companyCode === companyCode) renderStatementDetails();
   }
+}
+
+/**
+ * 概要: 選択中の四半期の公式決算PDFから事業セグメントを取得します。
+ * 引数: なし。
+ * 戻り値: セグメント情報が取得できた場合はtrueを返すPromise。
+ */
+function loadActiveSegmentReport() {
+  const current = activeResult();
+  if (!current) return Promise.resolve(false);
+  const companyCode = state.companyCode;
+  const key = `${companyCode}:${current.periodEnd}`;
+  if (segmentReportRequests.has(key)) return segmentReportRequests.get(key);
+  const pending = (async () => {
+    const reports = state.officialReportsByCompany[companyCode] ?? [];
+    const known = reports.find((row) => row.periodEnd === current.periodEnd)
+      ?? reports.find((row) => row.fiscalYear === current.fiscalYear && row.quarter === current.quarter);
+    if (known?.segmentRows?.length) return Boolean(flowResult()?.segmentRows?.length);
+    const response = await fetch(`/api/official-reports?company=${encodeURIComponent(companyCode)}`, {
+      cache:"no-store", signal:requestTimeout(40000),
+    });
+    if (!response.ok) throw new Error("公式決算書一覧の取得に失敗しました");
+    const payload = await response.json();
+    if (!Array.isArray(payload.documents)) throw new Error("公式決算書一覧の形式が正しくありません");
+    const document = payload.documents.find((row) => row.url === known?.sourceUrl)
+      ?? payload.documents.find((row) => row.fiscalYear === current.fiscalYear && row.quarter === current.quarter);
+    if (!document || typeof document.url !== "string") return false;
+    if (checkedSegmentSources.has(document.url)) return Boolean(flowResult()?.segmentRows?.length);
+    const cached = state.parsedReportCache.get(document.url);
+    let parsed = cached?.segmentRows ? cached : null;
+    if (!parsed) {
+      const pdf = await fetch(`/api/report-pdf?company=${encodeURIComponent(companyCode)}&url=${encodeURIComponent(document.url)}`, {
+        signal:requestTimeout(20000),
+      });
+      if (!pdf.ok) throw new Error("公式PDFの取得に失敗しました");
+      parsed = await extractStatement(new Uint8Array(await pdf.arrayBuffer()), companyCode, document.url,
+        companies[companyCode].stockSymbol.replace(/\.T$/, ""));
+    }
+    checkedSegmentSources.add(document.url);
+    if (!parsed) return false;
+    state.parsedReportCache.set(document.url, parsed);
+    if (!parsed.segmentRows?.length) return false;
+    const latestReports = state.officialReportsByCompany[companyCode] ?? [];
+    state.officialReportsByCompany[companyCode] = [...new Map([...latestReports, parsed]
+      .map((row) => [row.periodEnd, row])).values()].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd));
+    applyOfficialStatements(companyCode);
+    return Boolean(flowResult()?.segmentRows?.length);
+  })().finally(() => segmentReportRequests.delete(key));
+  segmentReportRequests.set(key, pending);
+  return pending;
+}
+
+/**
+ * 概要: セクター別モードの選択期にセグメント情報がなければ公式PDFを解析します。
+ * 引数: なし。
+ * 戻り値: なし。
+ */
+function requestActiveSegmentFlow() {
+  if (state.flowMode !== "sector" || flowResult()?.segmentRows?.length) return;
+  const requestCompany = state.companyCode;
+  const requestPeriod = activeResult()?.periodEnd;
+  elements.statementStatus.textContent = t("公式決算書のセグメント情報を解析しています。");
+  loadActiveSegmentReport().then((available) => {
+    if (state.flowMode !== "sector" || state.companyCode !== requestCompany || activeResult()?.periodEnd !== requestPeriod) return;
+    renderAnnualFlow();
+    drawSankeyChart();
+    if (!available) elements.statementStatus.textContent = t("公式資料からセグメント別の収入・利益を確認できませんでした。");
+  }).catch((error) => {
+    if (state.flowMode === "sector" && state.companyCode === requestCompany && activeResult()?.periodEnd === requestPeriod) {
+      elements.statementStatus.textContent = `${t("セグメント情報を取得できませんでした。")} ${error.message}`;
+    }
+  });
 }
 
 function showToast(message) {
@@ -1872,7 +2072,7 @@ async function refreshHourlyMarket() {
 }
 
 /**
- * 概要: 会社を開いたときや更新ボタンを押したときの、データ更新の中心処理です。
+ * 概要: 株価・業績・公式決算を取得し、統合完了まで読み込み表示を維持します。
  * 引数: notify - 通知の有無。reloadDatabase - DBの再取得。forceStock - 日足の再取得。
  * 戻り値: 更新処理が終わったことを示すPromise。
  */
@@ -1884,63 +2084,71 @@ async function refreshCompany({ notify = false, reloadDatabase = false, forceSto
   const previousId = state.activeId;
   const followedLatest = previousId === state.results.at(-1)?.id;
   state.refreshingCompanies.add(companyCode);
-  updateRefreshButtonAvailability();
-  state.stockChartStatus = "loading";
-  state.stockChartError = "";
-  state.stockPrices = state.stockPricesBySymbol[symbol] ?? [];
-  renderStockChart();
-
-  if ((reloadDatabase || !state.databaseLoaded) && !databaseRequest) {
-    databaseRequest = loadDatabaseData().then(() => { state.databaseError = null; })
-      .catch((error) => { state.databaseError = error.message; })
-      .finally(() => { databaseRequest = null; });
-  }
-  const results = await Promise.allSettled([
-    databaseRequest,
-    loadMarketPayload("/api/financial-results", symbol),
-    loadStockPrices(symbol, { force: forceStock }),
-    refreshQuote(symbol),
-  ]);
-  const financial = results[1];
-  if (financial.status === "fulfilled" && Array.isArray(financial.value.results)) {
-    state.financialByCompany[companyCode] = financial.value;
-    delete state.financialErrorsByCompany[companyCode];
-  } else {
-    state.financialErrorsByCompany[companyCode] = "外部業績を取得できませんでした";
-  }
-  const external = state.financialByCompany[companyCode];
-  if (external) state.resultsByCompany[companyCode] = mergeFinancialResults(
-    state.resultsByCompany[companyCode] ?? [], external, companyCode);
-  state.resultsByCompany[companyCode] = mergeOfficialStatements(state.resultsByCompany[companyCode] ?? [],
-    state.officialReportsByCompany[companyCode] ?? []);
-
-  // DB読込が資料一覧を置き換えた後で収集済みPDFを追加します。
-  try { await loadOfficialIrDocuments(companyCode); }
-  catch (error) { console.warn("公式IR資料の取得に失敗しました。", error); }
-
-  state.refreshingCompanies.delete(companyCode);
-  const stock = results[2];
-  if (state.companyCode === companyCode) {
-    state.stockPrices = stock.status === "fulfilled" ? stock.value : state.stockPricesBySymbol[symbol] ?? [];
-    state.stockChartStatus = stock.status === "fulfilled" ? "ready" : "error";
-    state.stockChartError = stock.status === "rejected" ? "日足の更新失敗・前回取得値を表示" : "";
-    if (stock.status === "rejected" && state.stockPayloadBySymbol[symbol]) state.stockPayloadBySymbol[symbol].stale = true;
-    state.stockChartSymbol = companies[companyCode].stockSymbol;
-    state.results = state.resultsByCompany[companyCode] ?? [];
-    // 取得中に変更した年度・四半期の選択も維持します。
-    const selectionChanged = state.activeId !== previousId;
-    const selected = selectionChanged ? state.activeId : previousId;
-    state.activeId = (selectionChanged || !followedLatest) && state.results.some((row) => row.id === selected)
-      ? selected : state.results.at(-1)?.id ?? null;
-    updateLatestUpdate(companyCode);
-    render();
-  }
-  updateRefreshButtonAvailability();
-  loadOfficialStatements(companyCode, forceStock);
-  if (notify && state.companyCode === companyCode) {
-    const failed = state.databaseError || financial.status === "rejected" || external?.stale
-      || stock.status === "rejected" || !results[3].value || state.stockPayloadBySymbol[symbol]?.stale;
-    showToast(failed ? "一部の更新に失敗しました。画面の取得状態をご確認ください。" : "株価・配信元業績を更新しました。公式決算書の解析も進めています。");
+  renderCompanyLoading();
+  try {  
+    updateRefreshButtonAvailability();
+    state.stockChartStatus = "loading";
+    state.stockChartError = "";
+    state.stockPrices = state.stockPricesBySymbol[symbol] ?? [];
+    renderStockChart();
+  
+    if ((reloadDatabase || !state.databaseLoaded) && !databaseRequest) {
+      databaseRequest = loadDatabaseData().then(() => { state.databaseError = null; })
+        .catch((error) => { state.databaseError = error.message; })
+        .finally(() => { databaseRequest = null; });
+    }
+    const results = await Promise.allSettled([
+      databaseRequest,
+      loadMarketPayload("/api/financial-results", symbol),
+      loadStockPrices(symbol, { force: forceStock }),
+      refreshQuote(symbol),
+    ]);
+    const financial = results[1];
+    if (financial.status === "fulfilled" && Array.isArray(financial.value.results)) {
+      state.financialByCompany[companyCode] = financial.value;
+      delete state.financialErrorsByCompany[companyCode];
+    } else {
+      state.financialErrorsByCompany[companyCode] = "外部業績を取得できませんでした";
+    }
+    const external = state.financialByCompany[companyCode];
+    if (external) state.resultsByCompany[companyCode] = mergeFinancialResults(
+      state.resultsByCompany[companyCode] ?? [], external, companyCode);
+    state.resultsByCompany[companyCode] = mergeOfficialStatements(state.resultsByCompany[companyCode] ?? [],
+      state.officialReportsByCompany[companyCode] ?? []);
+  
+    // DB読込が資料一覧を置き換えた後で収集済みPDFを追加します。
+    try { await loadOfficialIrDocuments(companyCode); }
+    catch (error) { console.warn("公式IR資料の取得に失敗しました。", error); }
+  
+    const stock = results[2];
+    if (state.companyCode === companyCode) {
+      state.stockPrices = stock.status === "fulfilled" ? stock.value : state.stockPricesBySymbol[symbol] ?? [];
+      state.stockChartStatus = stock.status === "fulfilled" ? "ready" : "error";
+      state.stockChartError = stock.status === "rejected" ? "日足の更新失敗・前回取得値を表示" : "";
+      if (stock.status === "rejected" && state.stockPayloadBySymbol[symbol]) state.stockPayloadBySymbol[symbol].stale = true;
+      state.stockChartSymbol = companies[companyCode].stockSymbol;
+      state.results = state.resultsByCompany[companyCode] ?? [];
+      // 取得中に変更した年度・四半期の選択も維持します。
+      const selectionChanged = state.activeId !== previousId;
+      const selected = selectionChanged ? state.activeId : previousId;
+      state.activeId = (selectionChanged || !followedLatest) && state.results.some((row) => row.id === selected)
+        ? selected : state.results.at(-1)?.id ?? null;
+      updateLatestUpdate(companyCode);
+      render();
+    }
+    updateRefreshButtonAvailability();
+    await loadOfficialStatements(companyCode, forceStock);
+    if (notify && state.companyCode === companyCode) {
+      const failed = state.databaseError || financial.status === "rejected" || external?.stale
+        || stock.status === "rejected" || !results[3].value || state.stockPayloadBySymbol[symbol]?.stale
+        || state.officialReportErrorsByCompany[companyCode];
+      showToast(failed ? "一部の更新に失敗しました。画面の取得状態をご確認ください。" : "株価・公表済み業績・公式決算書を更新しました。");
+    }
+  } finally {
+    state.refreshingCompanies.delete(companyCode);
+    state.completedCompanies.add(companyCode);
+    if (state.companyCode === companyCode) render();
+    updateRefreshButtonAvailability();
   }
 }
 
@@ -2001,6 +2209,7 @@ elements.yearSelect.addEventListener("change", (event) => {
   renderCharts();
   renderDataStatus();
   renderStatementDetails();
+  requestActiveSegmentFlow();
 });
 elements.quarterSelect.addEventListener("change", (event) => {
   state.activeId = event.target.value;
@@ -2012,6 +2221,7 @@ elements.quarterSelect.addEventListener("change", (event) => {
   renderCharts();
   renderDataStatus();
   renderStatementDetails();
+  requestActiveSegmentFlow();
 });
 elements.companyButtons.forEach((button) => {
   button.addEventListener("click", async () => {
@@ -2027,6 +2237,7 @@ elements.companyButtons.forEach((button) => {
     updateLatestUpdate();
     render();
     await refreshCompany();
+    requestActiveSegmentFlow();
   });
 });
 elements.refreshButton.addEventListener("click", () => refreshCompany({
@@ -2039,7 +2250,7 @@ window.addEventListener("resize", () => {
   if (state.stockPrices.length) drawStockChart();
 });
 
-// ページを開いた直後に、まず予備データで描画してから最新データを取りに行きます。
+// 初回も公式決算の取得完了まで数値を隠して読み込み状態を表示します。
 updateLatestUpdate();
 render();
 refreshCompany({ reloadDatabase: true });
@@ -2072,12 +2283,13 @@ elements.autoRefresh.addEventListener("change", () => {
   if (elements.autoRefresh.checked) refreshDueData();
 });
 document.querySelector('#flow-mode').addEventListener('change',event=>{
-  state.flowMode=event.target.value==='cash'?'cash':'income';
+  state.flowMode=event.target.value==='cash'?'cash':event.target.value==='sector'?'sector':'income';
   if (state.flowMode==='cash') {
     const latest=(state.officialReportsByCompany[state.companyCode]??[]).filter(row=>row.cashFlow).at(-1);
     if (latest) state.statementSelectedEnd=latest.periodEnd;
   }
   renderStatementDetails(); renderAnnualFlow(); drawSankeyChart();
+  requestActiveSegmentFlow();
 });
 elements.statementSelect.addEventListener("change", (event) => {
   state.statementSelectedEnd = event.target.value;

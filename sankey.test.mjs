@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { buildIncomeFlow, sankeyHubSize } from "./sankey.js";
+import { buildIncomeFlow, buildSegmentFlow, sankeyHubSize } from "./sankey.js";
 
 test("合流部は収支総額に応じて滑らかに太くなり、小額・巨大額でも上下限を超えない", () => {
   let previous=0;
@@ -29,6 +29,21 @@ test("売上を営業費用・税金等・純利益へ分け、流入と流出�
   assertBalanced(flow);
   assert.deepEqual(flow.targets.map((node) => node.value), [800, 50, 150]);
   assert.equal(flow.sources.length, 1);
+});
+
+test("事業セグメントの収入を計算費用と利益へ配分し、セグメント損失も保存則を保つ", () => {
+  const flow = buildSegmentFlow([
+    {label:"自動車",revenue:1000,profit:250},
+    {label:"金融",revenue:200,profit:-50},
+  ]);
+  assert.ok(flow);
+  assert.equal(flow.totalRevenue,1200);
+  assert.equal(flow.totalExpenses,1000);
+  assert.equal(flow.totalProfit,200);
+  assert.ok(flow.targets.some(node=>node.label==="自動車 / セグメント費用（計算）"&&node.value===750));
+  assert.ok(flow.sources.some(node=>node.label==="金融 / セグメント損失（不足額）"&&node.value===50));
+  assert.equal(flow.total,flow.targets.reduce((sum,node)=>sum+node.value,0));
+  assert.equal(buildSegmentFlow([]),null);
 });
 
 test("営業利益より純利益が大きい場合は増益調整を流入側へ追加する", () => {

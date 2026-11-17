@@ -90,6 +90,11 @@ export function officialDocumentPeriod(document, companyCode, reports = []) {
   const toyota = (!companyCode || companyCode === "toyota") && url.match(/\/(20\d{2})_[1-4]q_/i);
   const tel = companyCode === "tokyo-electron" && url.match(/\/fy(\d{2})q[1-4]/i);
   const hitachi = companyCode === "hitachi" && url.match(/\/(20\d{2})_(?:[1-3]q|an)\.pdf/i);
+  const nissan = companyCode === "nissan" && url.match(/\/(20\d{2})([1-4])(?:st|nd|rd|th)_financialresult_/i);
+  if (!periodEnd && nissan) {
+    quarter = Number(nissan[2]);
+    periodEnd = new Date(Date.UTC(Number(nissan[1]), quarter * 3 + 3, 0)).toISOString().slice(0, 10);
+  }
   if (!endYear && toyota) endYear = Number(toyota[1]);
   if (!endYear && tel) endYear = 2000 + Number(tel[1]);
   if (!endYear && hitachi) endYear = Number(hitachi[1]) + 1;

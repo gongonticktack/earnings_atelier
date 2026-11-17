@@ -138,6 +138,8 @@ body::after {
 
 .flow-mode-control { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0; font-size: 14px; }
 .flow-mode-control select { padding: 10px 12px; border: 1px solid #65583a; border-radius: 8px; background: #24241c; color: #eee8dc; font: inherit; max-width: 100%; }
+.flow-mode-control .cumulative-flow-control { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.flow-mode-control input { accent-color: var(--gold); }
 .company-request-button {
   display: block; width: 100%; padding: 16px 12px; margin-top: 8px;
   border: 1px dashed #a28a53; border-radius: 12px; color: #dbc58c;
@@ -162,8 +164,14 @@ body::after {
 .company-request-dialog :focus-visible, .company-request-button:focus-visible { outline: 2px solid #dbc58c; outline-offset: 3px; }
 .company-switcher {
   display: grid;
-  margin-top: 34px;
+  margin-top: 8px;
   gap: 3px;
+}
+
+.company-ranking-note {
+  margin: 34px 9px 0;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .company-button {
@@ -269,6 +277,21 @@ body::after {
   margin: 0 auto;
   padding: 30px 35px 40px;
 }
+
+.company-loading {
+  display: flex;
+  min-height: 420px;
+  padding: 28px 16px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+  text-align: center;
+}
+.company-loading img { width: min(220px, 65vw); height: auto; border-radius: 18px; }
+.company-loading strong { color: var(--gold); font-size: 18px; }
+.company-loading span { color: var(--muted); font-size: 12px; }
+.company-loading[hidden], .company-data[hidden] { display: none; }
 
 .topbar,
 .hero-panel,
@@ -983,10 +1006,12 @@ tbody tr.selected {
 
   .company-switcher {
     display: flex;
-    margin-top: 15px;
+    margin-top: 8px;
     padding-bottom: 6px;
     overflow-x: auto;
   }
+
+  .company-ranking-note { margin-top: 15px; }
 
   .company-button {
     flex: 0 0 auto;

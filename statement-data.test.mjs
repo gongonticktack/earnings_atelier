@@ -4,9 +4,62 @@ import { test } from "node:test";
 import { buildCashFlow } from './cash-flow.js';
 import { quarterlyStatements } from './financial-reports.js';
 import { fiscalYearFromPeriod } from './market.js';
+import { parseStatementPages } from './financial-reports.js';
 
 const manifest = JSON.parse(await readFile(new URL("./statement-data.json", import.meta.url), "utf8"));
 const verified = JSON.parse(await readFile(new URL("./test-fixtures/official-statements.json", import.meta.url), "utf8"));
+
+test("国内の上場四輪メーカー10社を登録し、追加9社の公式決算と未解析資料の状態を保存する", async () => {
+  const expected={nissan:'7201',honda:'7267',suzuki:'7269',mazda:'7261',subaru:'7270','mitsubishi-motors':'7211',isuzu:'7202',archion:'543A','nissan-shatai':'7222'};
+  const config=JSON.parse(await readFile(new URL('./config.json',import.meta.url),'utf8'));
+  const html=await readFile(new URL('./index.html',import.meta.url),'utf8');
+  assert.equal([...html.matchAll(/data-company="/g)].length,30);
+  const switchers=[...html.matchAll(/<section class="company-switcher"[^>]*>([\s\S]*?)<\/section>/g)];
+  assert.equal(switchers.length,1);
+  assert.equal([...switchers[0][1].matchAll(/data-company="/g)].length,30);
+  assert.ok(!html.includes('aria-label="追加の自動車メーカー"'));
+  for(const [code,ticker] of Object.entries(expected)) {
+    assert.ok(config.additionalCompanies.some(row=>row.code===code&&row.stock_code===ticker),code);
+    assert.match(html,new RegExp(`data-company="${code}"`));
+    const reports=manifest.reportsByCompany[code];
+    assert.ok(reports.length>0,code);
+    assert.ok(manifest.documentsByCompany[code].every(doc=>new URL(doc.discoveredFrom).origin===new URL(doc.officialIrUrl).origin));
+    assert.equal(reports.at(-1).periodEnd,code==='subaru'?'2025-12-31':'2026-06-30',code);
+  }
+  assert.ok(manifest.failures.subaru.some(row=>row.url.includes('/AS07355/')));
+});
+
+test("JTの2022年度から2026年度中間期まで18原本と単独四半期が出典付きで揃う", async () => {
+  const reports = manifest.reportsByCompany.jt;
+  assert.equal(reports.length, 18);
+  assert.equal(manifest.failures.jt, undefined);
+  const quarters = quarterlyStatements(reports);
+  assert.equal(quarters.length, 18);
+  assert.equal(quarters.at(-1).periodEnd, "2026-06-30");
+  const pages = JSON.parse(await readFile(new URL("./test-fixtures/jt-2026-q2-pages.json", import.meta.url), "utf8"));
+  const latest = reports.at(-1);
+  assert.equal(latest.revenue, 1986070);
+  assert.equal(latest.operatingIncome, 644940);
+  assert.equal(latest.netIncome, 431829);
+  assert.deepEqual(latest.statementRows, parseStatementPages(pages, "jt", latest.sourceUrl, "2914").statementRows);
+  for (const report of reports) {
+    assert.equal(new URL(report.sourceUrl).hostname, "www.jti.co.jp");
+    assert.ok(report.statementRows.length > 0);
+    assert.ok(manifest.documentsByCompany.jt.some(doc => doc.url === report.sourceUrl && doc.companyCode === "jt"));
+  }
+});
+
+test("10月16日時点の時価総額順で全30社を掲載し、番号は表示順の連番になる", async () => {
+  const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
+  const buttons = [...html.matchAll(/data-company="([^"]+)"[^>]*><span class="company-rank">(\d+)<\/span>[\s\S]*?<small>([0-9A-Z]{4})<\/small>/g)];
+  assert.deepEqual(buttons.slice(0, 20).map(match => match[3]), ["7203","8306","9984","6098","6501","6857","8316","8035","9983","6758","285A","8411","6861","8001","8058","8766","9432","2914","8031","6981"]);
+  assert.deepEqual(buttons.slice(0, 20).map(match => Number(match[2])), Array.from({length:20}, (_,i) => i + 1));
+  assert.equal(buttons[20][1], "shin-etsu");
+  assert.equal(buttons.length,30);
+  assert.deepEqual(buttons.map(match=>Number(match[2])),Array.from({length:30},(_,i)=>i+1));
+  assert.deepEqual(buttons.slice(20).map(match=>match[1]),['shin-etsu','honda','suzuki','subaru','isuzu','nissan','archion','mazda','mitsubishi-motors','nissan-shatai']);
+  assert.match(html, /2026\/10\/16時点/);
+});
 
 test("全保存原本の年度・四半期は公表時期ではなく実績期間に一致する", () => {
   for (const report of Object.values(manifest.reportsByCompany).flat()) {

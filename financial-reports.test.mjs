@@ -4,6 +4,28 @@ import { statementLines, statementPeriod, parseStatementPages, quarterlyStatemen
 import { buildIncomeFlow } from "./sankey.js";
 import { readFile } from "node:fs/promises";
 
+test("三菱自動車の利益科目と金額が別行でも、原本の当期売上・利益を照合する", async () => {
+  const pages=JSON.parse(await readFile(new URL('./test-fixtures/mitsubishi-motors-2026-q1-pages.json',import.meta.url),'utf8'));
+  const report=parseStatementPages(pages,'mitsubishi-motors','https://www.mitsubishi-motors.com/jp/investors/library/pdf/financial/2026/260803_FY26Q1_1j.pdf','7211');
+  assert.ok(report);
+  assert.equal(report.periodEnd,'2026-06-30');
+  assert.equal(report.revenue,619863);
+  assert.equal(report.operatingIncome,10082);
+  assert.equal(report.netIncome,1411);
+});
+
+test("JTの括弧付き費用を負数として読み、1株利益と調整後営業利益の表を混ぜない", async () => {
+  const pages = JSON.parse(await readFile(new URL("./test-fixtures/jt-2026-q2-pages.json", import.meta.url), "utf8"));
+  const report = parseStatementPages(pages, "jt", "https://www.jti.co.jp/investors/library/result/pdf/20260730_01.pdf", "2914");
+  assert.equal(report.statementRows.find(row => row.label === "売上原価")?.value, -816081);
+  assert.equal(report.statementRows.find(row => row.label === "販売費及び一般管理費等")?.value, -539177);
+  assert.equal(report.signedExpenses, true);
+  assert.ok(!report.statementRows.some(row => /調整後|買収に伴い|調整項目/.test(row.label)));
+  const flow = buildIncomeFlow(report, report.operatingIncome);
+  assert.ok(flow.targets.some(row => row.label === "売上原価" && row.value === 816081));
+  assert.ok(Math.abs(flow.residual) <= 3);
+});
+
 test("二段組で予想が先に抽出されても実績の連結業績見出しの期間だけを採用する", () => {
   const report=statementPeriod([{number:1,lines:["連結業績予想（2023年4月1日～2024年3月31日）","2023年3月期の連結業績（2022年4月1日～2023年3月31日）"]}]);
   assert.equal(report.fiscalYear,2022);
@@ -49,6 +71,63 @@ test("当期列・百万円単位・2026年度を確定し、原本ページと�
   assert.equal(flow.detailed, true);
   assert.ok(flow.targets.some((row) => row.label === "売上原価" && row.value === 700));
   assert.equal(flow.residual, 0);
+});
+
+test("公式セグメント表から収入・利益を読み取り、連続する累計から単独期の差分を作る", () => {
+  const sourcePages = [...pages, {number:9,lines:[
+    "報告セグメントごとの売上収益及びセグメント利益",
+    "単位：百万円",
+    "自動車 1,000 200",
+    "金融 300 80",
+    "サービス 100 (20)",
+    "合計 1,300 280",
+  ]}];
+  const cumulative = parseStatementPages(sourcePages,"toyota","https://official.test/q1.pdf");
+  assert.deepEqual(cumulative.segmentRows,[
+    {label:"自動車",revenue:1000,profit:200,page:9},
+    {label:"金融",revenue:300,profit:80,page:9},
+    {label:"サービス",revenue:100,profit:-20,page:9},
+  ]);
+  const withoutUnit = sourcePages.map(page => page.number === 9
+    ? {...page,lines:page.lines.filter(line=>line!=="単位：百万円")} : page);
+  assert.deepEqual(parseStatementPages(withoutUnit,"toyota","https://official.test/no-unit.pdf").segmentRows,[]);
+  const next = {...cumulative,quarter:2,months:6,basis:"cumulative",periodEnd:"2026-09-30",
+    revenue:2200,operatingCost:1700,operatingIncome:500,netIncome:330,sourceUrl:"https://official.test/q2.pdf",
+    segmentRows:cumulative.segmentRows.map(row=>({...row,revenue:row.revenue*2,profit:row.profit*2}))};
+  const quarterly = quarterlyStatements([cumulative,next])[1];
+  assert.deepEqual(quarterly.segmentRows,[
+    {label:"自動車",revenue:1000,profit:200,page:9},
+    {label:"金融",revenue:300,profit:80,page:9},
+    {label:"サービス",revenue:100,profit:-20,page:9},
+  ]);
+});
+
+test("複数列の報告セグメント表を期間に合わせて抽出し、注記の調整項目を除外する", () => {
+  const segmentPage = { number: 9, lines: [
+    "報告セグメントによる収益及び業績",
+    "当第1四半期（2026年4月1日 至 2026年6月30日）",
+    "その他",
+    "消去 連結",
+    "たばこ 加工食品 計",
+    "百万円 百万円 百万円 百万円 百万円 百万円",
+    "売上収益",
+    "外部収益 100 50 150 1 0 151",
+    "セグメント損益",
+    "調整後営業利益(注1) 40 10 50 - 0 50",
+  ] };
+  const report = parseStatementPages([...pages, segmentPage], "jt", "https://official.test/jt-q1.pdf");
+  assert.deepEqual(report.segmentRows, [
+    { label: "たばこ", revenue: 100, profit: 40, page: 9 },
+    { label: "加工食品", revenue: 50, profit: 10, page: 9 },
+  ]);
+
+  const notePage = { number: 9, lines: [
+    "報告セグメントに帰属しない本社経費",
+    "セグメント情報 売上収益 調整後営業利益",
+    "単位：百万円",
+    "リストラクチャリング費用 966 2,831",
+  ] };
+  assert.deepEqual(parseStatementPages([...pages, notePage], "jt", "https://official.test/jt-note.pdf").segmentRows, []);
 });
 
 test("前期列の誤採用、別会社、単位違い、予想しかない資料を採用しない", () => {

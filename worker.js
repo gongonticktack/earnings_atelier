@@ -193,12 +193,12 @@ async function fetchWeeklyStockPrices(symbol) {
 /**
  * 概要: 公開設定と会社マスタから定期更新の対象会社を取得します。
  * 引数: env - Workersのバインディング。
- * 戻り値: 有効な会社の配列を返すPromise。
+ * 戻り値: DBの有効な会社と公開設定の追加会社を、会社コードの重複なしで返すPromise。
  */
 async function fetchActiveCompanies(env) {
   const configResponse = await env.ASSETS.fetch("https://assets.local/config.json");
   if (!configResponse.ok) throw new Error(`config.json ${configResponse.status}`);
-  const { supabase } = await configResponse.json();
+  const { supabase, additionalCompanies = [] } = await configResponse.json();
   if (!supabase?.url || !supabase?.key) throw new Error("Supabaseの公開設定がありません");
 
   const endpoint = new URL("/rest/v1/earn_companies", supabase.url);
@@ -209,7 +209,9 @@ async function fetchActiveCompanies(env) {
   if (!response.ok) throw new Error(`earn_companies ${response.status}`);
   const rows = await response.json();
   if (!Array.isArray(rows)) throw new Error("会社マスタの形式が正しくありません");
-  return rows.filter((row) => COMPANY_CODE_PATTERN.test(row.code ?? ""));
+  return [...new Map([...additionalCompanies, ...rows]
+    .filter((row) => COMPANY_CODE_PATTERN.test(row.code ?? ""))
+    .map((row) => [row.code, row])).values()];
 }
 
 /**

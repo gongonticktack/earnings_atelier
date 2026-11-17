@@ -1,6 +1,12 @@
 const compact = text => text.normalize('NFKC').replace(/[\s・･]/g,'');
 const number = token => !token || /^[－―—-]$/.test(token) ? null : Number(token.replace(/[△▲−]/,'-').replaceAll(',',''));
 
+/** 概要: 3種類のCF合計より後に開示された現金残高の調整だけを選び、CF内の取引を二重計上しません。引数: rows - 原本順の科目配列。戻り値: 為替・連結範囲・決算期変更等の調整行。 */
+export function cashFlowAdjustments(rows) {
+  const totalIndex=rows.findLastIndex(row=>/^財務活動.*(?:キャッシュフロー|現金及び現金同等物)/.test(row.label));
+  return rows.slice(totalIndex+1).filter(row=>/為替.*(?:影響|換算)|換算差額|換算.*影響|連結(?:の)?範囲.*(?:変動|変更)|新規連結|連結除外|売却目的|振替|決算期変更.*現金/.test(row.label));
+}
+
 /** 概要: 連結CF計算書の当期列から現金残高・3種類のCF・細目を読みます。引数: pages - PDF行と番号、period - 損益と共通の実績期間。戻り値: 百万円単位のCFと原本科目、開示を確定できなければnull。 */
 export function parseCashFlowPages(pages, period) {
   for (let index=0;index<pages.length;index++) {
@@ -48,7 +54,7 @@ export function parseCashFlowPages(pages, period) {
     const financing=pick(/^財務活動(?:による|からの|に関する)キャッシュフロー(?:合計|計)?(?:\(.*\))?$/)
       ?? pick(/^財務活動(?:から得た|に使用した)現金及び現金同等物\(純額\)$/);
     if (![opening,closing,operating,investing,financing].every(Number.isFinite) || opening<0 || closing<0) continue;
-    const adjustments=rows.filter(row=>/為替.*(?:影響|換算)|換算差額|連結範囲.*(?:変動|変更)|新規連結|連結除外|売却目的|振替/.test(row.label));
+    const adjustments=cashFlowAdjustments(rows);
     const adjustmentTotal=adjustments.reduce((sum,row)=>sum+row.value,0);
     const residual=closing-opening-operating-investing-financing-adjustmentTotal;
     return {...period,opening,closing,operating,investing,financing,adjustments,adjustmentTotal,residual,rows,
