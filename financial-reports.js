@@ -2,74 +2,259 @@ import { parseCashFlowPages } from './cash-flow.js';
 const finite = Number.isFinite;
 const compact = (text) => text.normalize("NFKC").replace(/[\s|]/g, "");
 
+function statementRowsWithCells(items) {
+  const rows = [];
+  for (const item of items) {
+    if (typeof item.str !== "string" || !item.str.trim()) continue;
+    const y = item.transform?.[5];
+    const x = item.transform?.[4];
+    if (!finite(y) || !finite(x)) continue;
+    let row = rows.find((candidate) => Math.abs(candidate.y - y) < 2);
+    if (!row) { row = { y, cells: [] }; rows.push(row); }
+    const text = item.str.trim();
+    const width = finite(item.width) ? item.width : 0;
+    const tokens = [...text.matchAll(/\S+/g)];
+    const numericToken = /^(?:\([\d,]+(?:\.\d+)?\)|[△▲−-]?\d[\d,]*(?:\.\d+)?|[－―—–])$/;
+    if (tokens.length > 1 && width > 0
+        && tokens.every((token) => numericToken.test(token[0].normalize("NFKC")))) {
+      for (const token of tokens) {
+        const start = token.index / text.length;
+        const end = (token.index + token[0].length) / text.length;
+        row.cells.push({ x: x + width * start, width: width * (end - start), text: token[0] });
+      }
+    } else {
+      row.cells.push({ x, width, text });
+    }
+  }
+  return rows.sort((a, b) => b.y - a.y).map((row) => row.cells.sort((a, b) => a.x - b.x));
+}
+
 /**
- * 概要: セグメント情報の表から、収入とセグメント利益が明示された事業行を読み取ります。
- * 引数: pages - ページ番号と行配列を持つPDFページ。
- * 戻り値: 百万円単位の事業セグメント配列。表の形式を確定できない場合は空配列。
+ * 概要: セグメント表から対象期の収入と利益を列位置に基づいて読み取ります。
+ * 引数: pages - ページ番号、PDF行、PDF文字セルを持つページ。period - 対象期間。
+ * 戻り値: 百万円単位の事業セグメント配列。表を確定できない場合は空配列。
  */
 function parseSegmentRows(pages, period) {
   const rows = [];
-  const amount = String.raw`(?:\([\d,]+(?:\.\d+)?\)|[△▲−-]?\d[\d,]*(?:\.\d+)?)`;
+  const amountPattern = /^(?:\([\d,]+(?:\.\d+)?\)|[△▲−-]?\d[\d,]*(?:\.\d+)?|[－―—–])$/;
+  const parseAmount = (value) => {
+    const normalized = value.normalize("NFKC").trim();
+    if (/^[-―—–]$/.test(normalized)) return null;
+    if (!amountPattern.test(normalized)) return null;
+    return normalized.startsWith("(") ? -Number(normalized.slice(1, -1).replaceAll(",", ""))
+      : Number(normalized.replace(/[△▲−]/, "-").replaceAll(",", ""));
+  };
+  const markerPattern = /報告セグメント|セグメント別損益|セグメントごとの売上|事業別セグメント/;
+  const profitPattern = /^(?:セグメント.*(?:利益|損益|損失)|(?:調整後)?営業(?:利益(?:・損失)?|損失)|営業純益|(?:連結)?業務純益)/;
+  const revenuePattern = /(?:外部(?:顧客|収益)|業務粗利益|粗利益|売上(?:高|収益)|営業収益)/;
+  const totalPattern = /^(?:計|小計|合計|収益合計|売上(?:高|収益)合計|営業収益合計)$/;
+
   if (period) {
     const [year, month, day] = period.periodEnd.split("-").map(Number);
-    const periodDate = `${year}年${month}月${day}日`;
-    for (const page of pages) {
-      const text = compact(page.lines.join(" "));
-      if (!text.includes(compact(periodDate)) || !/報告セグメント/.test(text)
-          || !/外部収益/.test(text) || !/調整後営業利益/.test(text) || !/百万円/.test(text)) continue;
-      const sectionStart = page.lines.findIndex((line) => compact(line).includes("報告セグメント"));
-      const unitIndex = page.lines.findIndex((line, index) => index > sectionStart && /百万円/.test(compact(line)));
-      if (sectionStart < 0 || unitIndex < 0) continue;
-      const segmentNames = page.lines.slice(sectionStart + 1, unitIndex).map((line) => {
-        const parts = line.normalize("NFKC").trim().split(/\s+/);
-        const totalIndex = parts.indexOf("計");
-        return totalIndex > 1 ? parts.slice(0, totalIndex) : [];
-      }).find((names) => names.length > 0);
-      if (!segmentNames) continue;
-      const parseCells = (pattern) => {
-        const line = page.lines.find((candidate) => pattern.test(candidate.normalize("NFKC").trim()));
-        if (!line) return null;
-        const values = line.normalize("NFKC").trim().replace(pattern, "").trim().split(/\s+/);
-        if (values.length < segmentNames.length) return null;
-        return values.slice(0, segmentNames.length).map((value) => {
-          if (/^[－―—-]$/.test(value)) return null;
-          if (!new RegExp(`^${amount}$`).test(value)) return null;
-          return value.startsWith("(") ? -Number(value.slice(1, -1).replaceAll(",", ""))
-            : Number(value.replace(/[△▲−]/, "-").replaceAll(",", ""));
-        });
+    const periodDate = compact(`${year}年${month}月${day}日`);
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+      const currentPage = pages[pageIndex];
+      if (!Array.isArray(currentPage.tableRows)) continue;
+      const previousRows = pages[pageIndex - 1]?.tableRows ?? [];
+      const nextRows = pages[pageIndex + 1]?.tableRows ?? [];
+      const page = {
+        ...currentPage,
+        tableRows: [...previousRows, ...currentPage.tableRows, ...nextRows],
       };
-      const revenues = parseCells(/^外部収益\s+/);
-      const profits = parseCells(/^調整後営業利益(?:\(注\d+\))?\s*/);
-      if (!revenues || !profits) continue;
-      for (let index = 0; index < segmentNames.length; index++) {
+      const lineTexts = page.tableRows.map((line) => compact(line.map((cell) => cell.text).join(" ")));
+      const periodIndexes = currentPage.tableRows.flatMap((line, index) =>
+        lineTexts[previousRows.length + index].includes(periodDate) ? [previousRows.length + index] : []);
+      if (!periodIndexes.length) continue;
+
+      for (const periodIndex of periodIndexes) {
+      if (lineTexts.some((line) => /外部顧客に対するもの/.test(line))
+          && lineTexts.some((line) => /セグメント別損益/.test(line))) {
+        let measure = null;
+        for (let index = periodIndex - 1; index >= Math.max(0, periodIndex - 24); index--) {
+          if (/営業収益/.test(lineTexts[index])) { measure = "revenue"; break; }
+          if (/セグメント別損益|セグメント利益/.test(lineTexts[index])) { measure = "profit"; break; }
+        }
+        const verticalSegments = new Map();
+        let activeLabel = "";
+        for (let index = periodIndex + 1; measure && index < page.tableRows.length; index++) {
+          const line = lineTexts[index];
+          if (/セグメント別損益|セグメント利益/.test(line)) {
+            measure = "profit";
+            activeLabel = "";
+            continue;
+          }
+          if (/営業収益/.test(line) && !/外部/.test(line)) {
+            measure = "revenue";
+            activeLabel = "";
+            continue;
+          }
+          const cells = page.tableRows[index];
+          const numericCells = cells.filter((cell) => parseAmount(cell.text) !== null);
+          const firstNumeric = cells.findIndex((cell) => parseAmount(cell.text) !== null);
+          const ownLabel = firstNumeric < 0 ? "" : compact(cells.slice(0, firstNumeric).map((cell) => cell.text).join(" "));
+          if (measure === "revenue" && /外部顧客に対するもの/.test(line) && numericCells.length >= 2 && activeLabel) {
+            const value = parseAmount([...numericCells].sort((a, b) => a.x - b.x).at(-1).text);
+            if (finite(value) && value > 0) verticalSegments.set(activeLabel, { label: activeLabel, revenue: value });
+            continue;
+          }
+          if (measure === "profit" && numericCells.length >= 2) {
+            const label = ownLabel || activeLabel;
+            const value = parseAmount([...numericCells].sort((a, b) => a.x - b.x).at(-1).text);
+            if (label && !/(?:合計|消去|調整|営業利益|セグメント利益|損失|計)/.test(label) && finite(value)) {
+              const segment = verticalSegments.get(label);
+              if (segment) segment.profit = value;
+            }
+            continue;
+          }
+          if (!numericCells.length && /(?:事業|本部|部門|その他)/.test(line)
+              && !/(?:報告セグメント|セグメント|売上|収益|利益|顧客|合計|小計|消去)/.test(line)) {
+            activeLabel = line;
+          }
+        }
+        const result = [...verticalSegments.values()]
+          .filter((segment) => finite(segment.revenue) && finite(segment.profit))
+          .map((segment) => ({ ...segment, page: currentPage.number }));
+        if (result.length) return result;
+      }
+
+      const dataRows = [];
+      let pendingLabels = [];
+      for (let index = periodIndex + 1; index < page.tableRows.length; index++) {
+        const cells = page.tableRows[index];
+        if (/\d{4}年\d{1,2}月\d{1,2}日/.test(lineTexts[index]) && !lineTexts[index].includes(periodDate)) break;
+        const numericCells = cells.filter((cell) => parseAmount(cell.text) !== null
+          || /^[-―—–]$/.test(cell.text.normalize("NFKC").trim()));
+        if (numericCells.length >= 2) {
+          const firstNumeric = cells.findIndex((cell) => parseAmount(cell.text) !== null
+            || /^[-―—–]$/.test(cell.text.normalize("NFKC").trim()));
+          const ownLabel = compact(cells.slice(0, firstNumeric).map((cell) => cell.text).join(" "));
+          const label = ownLabel && (revenuePattern.test(ownLabel) || profitPattern.test(ownLabel) || totalPattern.test(ownLabel))
+            ? ownLabel : compact([...pendingLabels.slice(-3), ownLabel].join(" "));
+          dataRows.push({ index, label, numericCells });
+          pendingLabels = [];
+          continue;
+        }
+        const text = compact(cells.map((cell) => cell.text).join(" "));
+        if (/(?:売上|収益|粗利益|利益|損益|損失|純益)/.test(text)
+            && !/(?:報告セグメント|セグメント間|外部顧客|内部|振替高|単位|百万円|情報|注\d+)/.test(text)) {
+          pendingLabels.push(text);
+          if (pendingLabels.length > 3) pendingLabels.shift();
+        } else if (pendingLabels.length && !/(?:報告セグメント|セグメント間|外部顧客|内部|振替高|単位|百万円|情報|注\d+|該当事項|以下の通り)/.test(text)) {
+          pendingLabels.push(text);
+          if (pendingLabels.length > 3) pendingLabels.shift();
+        } else {
+          pendingLabels = [];
+        }
+      }
+
+      const profitRow = dataRows.find((row) => row.index > periodIndex && profitPattern.test(row.label));
+      if (!profitRow) continue;
+      const revenueRows = dataRows.filter((row) => row.index < profitRow.index && revenuePattern.test(row.label));
+      const markerIndex = lineTexts.findLastIndex((line, index) => index < profitRow.index && markerPattern.test(line));
+      if (markerIndex < 0) continue;
+      const revenueHeaderExists = lineTexts.slice(markerIndex, profitRow.index)
+        .some((line) => /売上|収益|粗利益/.test(line));
+      const totalRevenueRows = dataRows.filter((row) => row.index < profitRow.index
+        && totalPattern.test(row.label) && revenueHeaderExists);
+      if (!revenueRows.length && !totalRevenueRows.length) continue;
+      const revenueRow = totalRevenueRows.at(-1) ?? revenueRows.at(-1);
+      const revenueEdges = revenueRow.numericCells.map((cell) => cell.x + cell.width);
+      if (revenueEdges.length < 2 || revenueEdges.some((edge) => !finite(edge))) continue;
+      const centers = revenueEdges.map((edge, index) => index === 0
+        ? edge - (revenueEdges[1] - edge) / 2 : (revenueEdges[index - 1] + edge) / 2);
+      const closestColumn = (x) => centers.reduce((closest, center, index) =>
+        Math.abs(center - x) < Math.abs(centers[closest] - x) ? index : closest, 0);
+      const headerColumn = (x) => {
+        const index = closestColumn(x);
+        const leftGap = index > 0 ? centers[index] - centers[index - 1] : centers[1] - centers[0];
+        const rightGap = index + 1 < centers.length ? centers[index + 1] - centers[index] : leftGap;
+        return Math.abs(centers[index] - x) <= Math.max(16, Math.min(leftGap, rightGap) * 0.6) ? index : -1;
+      };
+      const headerTexts = Array(centers.length).fill("");
+      const collectHeaders = (start, end) => {
+        const headers = Array(centers.length).fill("");
+        for (let index = start; index < Math.min(end, revenueRow.index); index++) {
+          const cells = page.tableRows[index];
+          const rowText = lineTexts[index];
+          if (/\d{4}年\d{1,2}月\d{1,2}日/.test(rowText) || markerPattern.test(rowText)) continue;
+          if (cells.some((cell) => parseAmount(cell.text) !== null
+              || /^[-―—–]$/.test(cell.text.normalize("NFKC").trim()))) continue;
+          for (const cell of cells) {
+            const text = compact(cell.text).replace(/注\d+/g, "");
+            if (!text || /^(?:[-―—]?\d+[-―—]?)+$/.test(text)
+                || /(?:報告セグメント|セグメント情報|財務諸表|注記事項|フィナンシャルグループ|単位|百万円|外部顧客|外部収益|セグメント間|内部(?:売上|収益)|振替高|売上(?:高|収益)|粗利益|営業(?:利益|損失|収益|純益)|セグメント(?:利益|損益|損失)|調整後営業|損益|利益|損失|費用|情報に関する|金額に関する|以下の通り|該当事項|報は|決算短信|株式会社|[（(]株[）)]|20\d{2}年度|20\d{2}年\d{1,2}月期)/.test(text)) continue;
+            const column = headerColumn(cell.x + cell.width / 2);
+            if (column < 0) continue;
+            if (!headers[column].includes(text)) headers[column] += text;
+          }
+        }
+        return headers;
+      };
+      const afterPeriodHeaders = collectHeaders(periodIndex + 1, revenueRow.index);
+      if (afterPeriodHeaders.some(Boolean)) {
+        afterPeriodHeaders.forEach((text, index) => { headerTexts[index] = text; });
+      } else {
+        const beforePeriodHeaders = collectHeaders(Math.max(previousRows.length, markerIndex + 1), periodIndex);
+        beforePeriodHeaders.forEach((text, index) => { headerTexts[index] = text; });
+      }
+
+      const aggregateIndex = headerTexts.findIndex((text) =>
+        /^(?:計|小計|合計|連結|調整額|調整|消去|全社|計上額)/.test(text));
+      const limit = aggregateIndex >= 0 ? aggregateIndex : headerTexts.length;
+      const segmentIndexes = headerTexts.slice(0, limit).flatMap((text, index) =>
+        text && !/(?:消去|調整|全社|小計|合計|連結|計上額)/.test(text) ? [index] : []);
+      if (!segmentIndexes.length) continue;
+
+      const valuesFor = (row) => {
+        const values = Array(revenueEdges.length).fill(null);
+        for (const cell of row.numericCells) {
+          const value = parseAmount(cell.text);
+          const edge = cell.x + cell.width;
+          if (value === null || !finite(edge)) continue;
+          const column = revenueEdges.reduce((closest, candidate, index) =>
+            Math.abs(candidate - edge) < Math.abs(revenueEdges[closest] - edge) ? index : closest, 0);
+          if (Math.abs(revenueEdges[column] - edge) < 8) values[column] = value;
+        }
+        return values;
+      };
+      const revenues = valuesFor(revenueRow);
+      const profits = valuesFor(profitRow);
+      const rowCountBefore = rows.length;
+      for (const index of segmentIndexes) {
         const revenue = revenues[index];
         const profit = profits[index];
-        if (!segmentNames[index] || !finite(revenue) || revenue <= 0 || !finite(profit)) continue;
-        rows.push({ label: compact(segmentNames[index]), revenue, profit, page: page.number });
+        const label = headerTexts[index];
+        if (!label || !/[一-龠ぁ-んァ-ヶA-Za-z]/.test(label)
+            || !finite(revenue) || revenue <= 0 || !finite(profit)) continue;
+        if (!rows.some((row) => row.label === label && row.revenue === revenue && row.profit === profit)) {
+          rows.push({ label, revenue, profit, page: currentPage.number });
+        }
+      }
+      if (rows.length > rowCountBefore) return rows;
       }
     }
     if (rows.length) return rows;
   }
+
   for (const page of pages) {
     const text = compact(page.lines.join(" "));
-    if (!/セグメント情報|報告セグメント(?:ごとの|による)|事業セグメント/.test(text) || !/売上(?:高|収益)/.test(text)
-        || !/(?:セグメント(?:の)?(?:営業)?(?:利益|損失|損益)|報告セグメント.*(?:利益|損失))/.test(text)
-        || !/百万円/.test(text)) continue;
+    if (!/報告セグメントごとの(?:売上|収益)|事業セグメント/.test(text)
+        || !/百万円/.test(text) || !/セグメント(?:利益|損失|損益)/.test(text)) continue;
     for (const raw of page.lines) {
       const match = raw.normalize("NFKC").trim().match(
-        new RegExp(`^(.+?)\\s+(${amount})\\s+(${amount})$`),
+        /^(.+?)\s+((?:\([\d,]+(?:\.\d+)?\)|[△▲−-]?\d[\d,]*(?:\.\d+)?)|(?:\([\d,]+(?:\.\d+)?\)|[△▲−-]?\d[\d,]*(?:\.\d+)?))\s+((?:\([\d,]+(?:\.\d+)?\)|[△▲−-]?\d[\d,]*(?:\.\d+)?))$/,
       );
       if (!match) continue;
       const label = compact(match[1]);
       if (!/[一-龠ぁ-んァ-ヶA-Za-z]/.test(label)
           || /売上|収益|利益|損失|調整|費用|^(?:合計|全社|消去|連結)/.test(label)) continue;
-      const parseAmount = (value) => value.startsWith("(") ? -Number(value.slice(1, -1).replaceAll(",", ""))
+      const parseSimpleAmount = (value) => value.startsWith("(") ? -Number(value.slice(1, -1).replaceAll(",", ""))
         : Number(value.replace(/[△▲−]/, "-").replaceAll(",", ""));
-      const revenue = parseAmount(match[2]);
-      const profit = parseAmount(match[3]);
-      if (!finite(revenue) || revenue <= 0 || !finite(profit)) continue;
-      if (rows.some((row) => row.label === label)) continue;
-      rows.push({ label, revenue, profit, page: page.number });
+      const revenue = parseSimpleAmount(match[2]);
+      const profit = parseSimpleAmount(match[3]);
+      if (finite(revenue) && revenue > 0 && finite(profit) && !rows.some((row) => row.label === label)) {
+        rows.push({ label, revenue, profit, page: page.number });
+      }
     }
   }
   return rows;
@@ -81,18 +266,7 @@ function parseSegmentRows(pages, period) {
  * 戻り値: 上から下、左から右に並べた文字列の配列。
  */
 export function statementLines(items) {
-  const rows = [];
-  for (const item of items) {
-    if (typeof item.str !== "string" || !item.str.trim()) continue;
-    const y = item.transform?.[5];
-    const x = item.transform?.[4];
-    if (!finite(y) || !finite(x)) continue;
-    let row = rows.find((candidate) => Math.abs(candidate.y - y) < 2);
-    if (!row) { row = { y, items: [] }; rows.push(row); }
-    row.items.push({ x, text: item.str });
-  }
-  return rows.sort((a, b) => b.y - a.y).map((row) => row.items.sort((a, b) => a.x - b.x)
-    .map((item) => item.text).join(" "));
+  return statementRowsWithCells(items).map((row) => row.map((cell) => cell.text).join(" "));
 }
 
 /**
@@ -231,7 +405,8 @@ export async function extractStatement(bytes, companyCode, sourceUrl, expectedCo
     for (let number = 1; number <= Math.min(pdf.numPages, 70); number++) {
       const page = await pdf.getPage(number);
       const { items } = await page.getTextContent();
-      pages.push({ number, lines: statementLines(items) });
+      const tableRows = statementRowsWithCells(items);
+      pages.push({ number, lines: tableRows.map((row) => row.map((cell) => cell.text).join(" ")), tableRows });
       // CF計算書は損益計算書の後ろに載るため、途中で解析を終了しません。
       page.cleanup();
     }

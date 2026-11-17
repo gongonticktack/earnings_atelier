@@ -103,17 +103,24 @@ test("公式セグメント表から収入・利益を読み取り、連続す�
 });
 
 test("複数列の報告セグメント表を期間に合わせて抽出し、注記の調整項目を除外する", () => {
+  const cell = (text, x, width = 24) => ({ text, x, width });
   const segmentPage = { number: 9, lines: [
     "報告セグメントによる収益及び業績",
     "当第1四半期（2026年4月1日 至 2026年6月30日）",
-    "その他",
-    "消去 連結",
-    "たばこ 加工食品 計",
-    "百万円 百万円 百万円 百万円 百万円 百万円",
     "売上収益",
-    "外部収益 100 50 150 1 0 151",
     "セグメント損益",
-    "調整後営業利益(注1) 40 10 50 - 0 50",
+    "調整後営業利益(注1)",
+  ], tableRows: [
+    [cell("報告セグメント", 160, 90)],
+    [cell("当第1四半期（2026年4月1日 至 2026年6月30日）", 20, 320)],
+    [cell("たばこ", 35), cell("加工食品", 135), cell("計", 235), cell("その他", 335),
+      cell("消去", 430), cell("連結", 535)],
+    [cell("売上収益", 20, 40)],
+    [cell("収益合計", 20, 50), cell("100", 80), cell("50", 180), cell("150", 280),
+      cell("1", 380), cell("0", 480), cell("151", 580)],
+    [cell("セグメント損益", 20, 60)],
+    [cell("営業利益・損失（△）", 20, 80), cell("40", 80), cell("10", 180), cell("50", 280),
+      cell("-", 380), cell("0", 480), cell("50", 580)],
   ] };
   const report = parseStatementPages([...pages, segmentPage], "jt", "https://official.test/jt-q1.pdf");
   assert.deepEqual(report.segmentRows, [
@@ -128,6 +135,36 @@ test("複数列の報告セグメント表を期間に合わせて抽出し、�
     "リストラクチャリング費用 966 2,831",
   ] };
   assert.deepEqual(parseStatementPages([...pages, notePage], "jt", "https://official.test/jt-note.pdf").segmentRows, []);
+});
+
+test("ページをまたぐセグメント表は外部顧客収益と同じセグメントの利益を対応させる", () => {
+  const cell = (text, x, width = 32) => ({ text, x, width });
+  const revenuePage = { number:9, lines:[], tableRows:[
+    [cell("営業収益", 20, 50)],
+    [cell("当第1四半期（2026年4月1日 至 2026年6月30日）", 20, 320)],
+    [cell("総合ICT事業", 20, 90)],
+    [cell("外部顧客に対するもの", 20, 130), cell("100", 220), cell("120", 320)],
+    [cell("セグメント間取引", 20, 100), cell("5", 220), cell("8", 320)],
+    [cell("地域通信事業", 20, 90)],
+    [cell("外部顧客に対するもの", 20, 130), cell("40", 220), cell("50", 320)],
+    [cell("その他（不動産等）", 20, 100)],
+    [cell("外部顧客に対するもの", 20, 130), cell("10", 220), cell("12", 320)],
+  ] };
+  const profitPage = { number:10, lines:[], tableRows:[
+    [cell("前第1四半期（2025年4月1日 至 2025年6月30日）", 20, 320)],
+    [cell("当第1四半期（2026年4月1日 至 2026年6月30日）", 20, 320)],
+    [cell("セグメント別損益", 20, 90)],
+    [cell("セグメント利益", 20, 90)],
+    [cell("総合ICT事業", 20, 90), cell("10", 220), cell("15", 320)],
+    [cell("地域通信事業", 20, 90), cell("3", 220), cell("4", 320)],
+    [cell("その他（不動産等）", 20, 100), cell("1", 220), cell("2", 320)],
+  ] };
+  const report = parseStatementPages([...pages, revenuePage, profitPage], "ntt", "https://official.test/ntt-q1.pdf");
+  assert.deepEqual(report.segmentRows, [
+    { label:"総合ICT事業", revenue:120, profit:15, page:9 },
+    { label:"地域通信事業", revenue:50, profit:4, page:9 },
+    { label:"その他(不動産等)", revenue:12, profit:2, page:9 },
+  ]);
 });
 
 test("前期列の誤採用、別会社、単位違い、予想しかない資料を採用しない", () => {

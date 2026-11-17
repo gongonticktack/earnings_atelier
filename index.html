@@ -244,10 +244,6 @@
             <select id="flow-mode"><option value="income" data-language>収入・支出</option><option value="cash" data-language>キャッシュフロー</option><option value="sector" data-language>セクター別</option></select>
             <label class="cumulative-flow-control"><input type="checkbox" id="cumulative-flow" /> <span data-language>年度累計で表示</span></label>
           </div>
-          <p class="panel-description" id="flow-description">
-            売上収益が費用・税金等・純利益へ配分される流れを表示します。帯の太さは金額に比例します。
-          </p>
-          <p class="chart-hint" data-language>クリック・タップで数値を表示</p>
           <div class="flow-layout">
             <div class="sankey-wrap" tabindex="0" role="region" aria-label="収入・支出の図。拡大表示では左右にスクロールできます。">
               <canvas id="sankey-chart" role="img" aria-label="収入・支出のサンキーグラフ"></canvas>
@@ -283,10 +279,6 @@
               </div>
             </aside>
           </div>
-          <p class="sankey-help" data-language>拡大表示では図を左右にスワイプできます。科目の全文と金額は下の内訳表でも確認できます。</p>
-          <p class="flow-note" id="flow-note">
-            この図は損益のつながりを示します。増益となる税金・その他は左側の流入、純損失は不足額として表示します。
-          </p>
           <div class="statement-heading">
             <h4 id="statement-title">決算書の収入・支出内訳</h4>
             <select id="statement-select" aria-label="内訳を確認する決算書"></select>

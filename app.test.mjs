@@ -501,6 +501,22 @@ test("年度累計チェックは選択期までの累計に切り替え、原�
   assert.equal(app.elements.annualRevenue.textContent, "+3億円");
 });
 
+test("第2四半期単独表示は前四半期末の翌日を開始日とし、サンキーの説明文を表示しない", async () => {
+  const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /flow-description|flow-note|sankey-help/);
+  const app = await setup();
+  const first = { id:"q1", fiscalYear:2026, quarter:1, periodEnd:"2026-06-30",
+    revenue:100, operatingCost:80, operatingIncome:20, pretaxIncome:20, netIncome:10 };
+  const second = { id:"q2", fiscalYear:2026, quarter:2, periodEnd:"2026-09-30",
+    revenue:200, operatingCost:150, operatingIncome:50, pretaxIncome:50, netIncome:30 };
+  app.state.results = [first, second];
+  app.state.activeId = second.id;
+  app.state.officialReportsByCompany.toyota = [];
+  app.elements.cumulativeFlow.listeners.change({ target:{ checked:false } });
+  assert.match(app.elements.flowPeriod.textContent, /2026-07-01〜2026-09-30/);
+  assert.match(app.elements.flowPeriod.textContent, /単独四半期/);
+});
+
 test("セクター別表示は公式セグメント収入と計算費用をサンキーに描く", async () => {
   const html = await readFile(new URL("./index.html", import.meta.url), "utf8");
   assert.match(html, /<option value="sector" data-language>セクター別<\/option>/);

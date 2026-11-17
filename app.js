@@ -599,7 +599,7 @@ function showChartInspection(canvas, datum, position = {}) {
   elements.chartTooltip.hidden = false;
   inspectedCanvas = canvas;
 }
-const staticLanguageNodes = [...document.querySelectorAll('[data-language], h1, h2, h3:not([id]), h4, .eyebrow:not([id]), .hero-description, .panel-description:not([id]), .flow-note, th, label[for], .investment-card small:not([id]), .metric-heading > span:first-child:not([id]), .metric-footer small:not([id]), .live-market-meta small, .annual-summary-values small:not([id]), .source-card small, .flow-period:not([id])')]
+const staticLanguageNodes = [...document.querySelectorAll('[data-language], h1, h2, h3:not([id]), h4, .eyebrow:not([id]), .hero-description, .panel-description:not([id]), th, label[for], .investment-card small:not([id]), .metric-heading > span:first-child:not([id]), .metric-footer small:not([id]), .live-market-meta small, .annual-summary-values small:not([id]), .source-card small, .flow-period:not([id])')]
   .map((node) => ({ node, original: node.textContent }));
 const staticLanguageLabels = [...document.querySelectorAll('section[aria-label]')].map((node) => ({ node, original: node.getAttribute("aria-label") }));
 
@@ -1236,6 +1236,24 @@ function formatFlowAmount(value) {
 }
 
 /**
+ * 概要: サンキーの期間表示で欠けている開始日を同じ年度の前四半期末から補います。
+ * 引数: result - 表示中の業績。
+ * 戻り値: YYYY-MM-DD形式の開始日。根拠がない場合はnull。
+ */
+function flowPeriodStart(result) {
+  if (result.periodStart) return result.periodStart;
+  if (!Number.isInteger(result.quarter) || result.quarter < 2 || result.basis === "cumulative") return null;
+  const rows = [...state.results, ...(state.officialReportsByCompany[state.companyCode] ?? [])];
+  const previous = rows.find((row) => row.fiscalYear === result.fiscalYear
+    && row.quarter === result.quarter - 1 && row.periodEnd);
+  if (!previous) return null;
+  const date = new Date(`${previous.periodEnd}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
  * 概要: 長い決算書の科目名をグラフの各列に収まる最大2行へ分けます。
  * 引数: context - 描画コンテキスト。label - 科目名。maxWidth - 表示可能幅。
  * 戻り値: 表示用の行配列。省略した全文は読み上げ説明と内訳表に保持します。
@@ -1262,14 +1280,12 @@ function renderAnnualFlow() {
   const cashMode=state.flowMode==='cash';
   const sectorMode=state.flowMode==='sector';
   document.querySelector('#flow-title').textContent=t(cashMode?'キャッシュフローのサンキーグラフ':sectorMode?'セクター別収入・支出のサンキーグラフ':'収入と支出のサンキーグラフ');
-  document.querySelector('#flow-description').textContent=t(cashMode?'期首現金と流入から、流出と期末現金へのつながりを表示します。帯の太さは金額に比例します。':sectorMode?'事業セグメントごとの収入と費用・利益の流れを表示します。帯の太さは金額に比例します。':'売上収益が費用・税金等・純利益へ配分される流れを表示します。帯の太さは金額に比例します。');
-  document.querySelector('#flow-note').textContent=t(cashMode?'営業・投資・財務CFは各活動の純額です。増加は左、減少は右に表示します。減価償却など現金を伴わない調整を、現金収入として重複計上しません。期首残高＋各CF＋為替等の調整＝期末残高です。':sectorMode?'セグメント費用はセグメント収入からセグメント利益を差し引いた計算値です。':'この図は損益のつながりを示します。増益となる税金・その他は左側の流入、純損失は不足額として表示します。');
   const captions=cashMode?['配分総額','期首現金及び現金同等物','営業キャッシュフロー','投資キャッシュフロー','財務キャッシュフロー','為替・その他の調整','期末現金及び現金同等物']:sectorMode?['セグメント収入','セグメント費用（計算）','セグメント利益','','','','']:['配分総額','売上収益','営業費用・費用等','費用差引後','税金・その他','利益率','純利益'];
   captions.forEach((label,index)=>{document.querySelector(index===2?'#flow-cost-caption':`#flow-caption-${index}`).textContent=t(label);});
   elements.cumulativeFlow.disabled=cashMode || !cumulativeFlowResult();
   if (cashMode) {
     const cash=result?.cashFlow;
-    elements.flowPeriod.textContent=t(result?`${fiscalPeriodLabel(result)} / ${result.periodStart}〜${result.periodEnd} / ${result.basis==='cumulative'?'累計':'単独四半期'}`:'決算データ未登録');
+    elements.flowPeriod.textContent=t(result?`${fiscalPeriodLabel(result)} / ${flowPeriodStart(result)??'期間開始不明'}〜${result.periodEnd} / ${result.basis==='cumulative'?'累計':'単独四半期'}`:'決算データ未登録');
     const values=cash?[buildCashFlow(cash)?.total,cash.opening,cash.operating,cash.investing,cash.financing,cash.adjustmentTotal+cash.residual,cash.closing]:[];
     [elements.previousCashAndCashEquivalents,elements.annualRevenue,elements.annualOperatingCost,elements.investmentCashFlow,elements.financingCashFlow,elements.otherCashFlowAdjustment,elements.cashAndCashEquivalents]
       .forEach((element,index)=>{element.textContent=t(Number.isFinite(values[index])?formatFlowAmount(values[index]):'開示なし');});
@@ -1277,7 +1293,7 @@ function renderAnnualFlow() {
   }
   if (sectorMode) {
     const flow=buildSegmentFlow(result?.segmentRows);
-    elements.flowPeriod.textContent=t(result?`${fiscalPeriodLabel(result)} / ${result.periodStart??'期間開始不明'}〜${result.periodEnd} / ${result.basis==='cumulative'?'累計':'単独四半期'}`:'決算データ未登録');
+    elements.flowPeriod.textContent=t(result?`${fiscalPeriodLabel(result)} / ${flowPeriodStart(result)??'期間開始不明'}〜${result.periodEnd} / ${result.basis==='cumulative'?'累計':'単独四半期'}`:'決算データ未登録');
     const values=flow?[flow.totalRevenue,flow.totalExpenses,flow.totalProfit]:[];
     [elements.previousCashAndCashEquivalents,elements.annualRevenue,elements.annualOperatingCost,elements.investmentCashFlow,elements.financingCashFlow,elements.otherCashFlowAdjustment,elements.cashAndCashEquivalents]
       .forEach((element,index)=>{element.textContent=t(Number.isFinite(values[index])?formatFlowAmount(values[index]):'開示なし');});
@@ -1306,7 +1322,7 @@ function renderAnnualFlow() {
   const profit = result.revenue - operatingCost;
   const taxAndOther = result.netIncome - profit;
   const margin = result.revenue > 0 ? (profit / result.revenue) * 100 : null;
-  elements.flowPeriod.textContent = t(`${fiscalPeriodLabel(result)} / ${result.periodStart ?? "期間開始不明"}〜${result.periodEnd}${result.basis === "cumulative" ? "（累計）" : "（単独四半期）"}`);
+  elements.flowPeriod.textContent = t(`${fiscalPeriodLabel(result)} / ${flowPeriodStart(result) ?? "期間開始不明"}〜${result.periodEnd}${result.basis === "cumulative" ? "（累計）" : "（単独四半期）"}`);
   elements.previousCashAndCashEquivalents.textContent = t(flow ? formatOptionalBillions(flow.total) : "開示なし");
   elements.annualRevenue.textContent = t(`+${formatOptionalBillions(result.revenue)}`);
   elements.annualOperatingCost.textContent = t(formatOptionalBillions(-operatingCost));

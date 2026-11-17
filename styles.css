@@ -718,8 +718,7 @@ select {
   color: var(--green);
 }
 
-.panel-description,
-.flow-note {
+.panel-description {
   color: var(--dim);
   font-size: 10px;
   line-height: 1.8;
@@ -761,7 +760,6 @@ select {
 
 .sankey-wrap:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
 .sankey-zoom-button { min-height: 44px; white-space: nowrap; }
-.sankey-help { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
 
 .statement-heading { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 26px; }
 .annual-flow-panel .panel-heading { flex-wrap: wrap; }
@@ -829,10 +827,6 @@ select {
 .expense-item strong {
   color: var(--text);
   font: 700 10px/1 var(--font-display);
-}
-
-.flow-note {
-  margin-top: 13px;
 }
 
 .stock-chart-panel {
