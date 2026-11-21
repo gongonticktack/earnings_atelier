@@ -2318,3 +2318,243 @@ elements.cumulativeFlow.addEventListener("change", (event) => {
   renderAnnualFlow();
   drawSankeyChart();
 });
+
+// カラーパレット（Color Hunt の人気パレットから選定、他サイト使用分は除外）
+// colors: パレット本来の4色（ストライプ表示用、比重 41/26/18/15）
+// vars:   このサイトの CSS変数（--bg / --panel / --gold など）へ割り当てる色。
+//         サイト全体が暗色テーマのため、全パレットとも暗背景＋明文字で統一し、
+//         文字色と背景のコントラスト比は 4.5:1 以上を検証済み。
+
+const PALETTES = [
+  {
+    name: "Atelier Bronze",
+    colors: ["#1C0A00", "#361500", "#603601", "#CC9544"],
+    vars: {
+      bg: "#1C0A00", panel: "rgba(42, 20, 5, 0.88)", panelStrong: "rgba(42, 20, 5, 0.96)",
+      line: "rgba(204, 149, 68, 0.12)", lineStrong: "rgba(204, 149, 68, 0.23)",
+      text: "#F3E7D3", muted: "#C9AE85", dim: "#AB9168",
+      gold: "#CC9544", goldSoft: "#BE8F45", onGold: "#1C0A00", goldHover: "#DCA856",
+      woodDark: "#120600", woodLight: "#2E1702", glow: "#CC9544", glowDeep: "#603601",
+    },
+  },
+  {
+    name: "Midnight Gold",
+    colors: ["#041C32", "#04293A", "#064663", "#ECB365"],
+    vars: {
+      bg: "#041C32", panel: "rgba(8, 42, 68, 0.88)", panelStrong: "rgba(8, 42, 68, 0.96)",
+      line: "rgba(236, 179, 101, 0.12)", lineStrong: "rgba(236, 179, 101, 0.23)",
+      text: "#F5EDDC", muted: "#A9BECD", dim: "#84A0B4",
+      gold: "#ECB365", goldSoft: "#D3A356", onGold: "#1A1408", goldHover: "#F2C684",
+      woodDark: "#03141F", woodLight: "#0A3049", glow: "#ECB365", glowDeep: "#064663",
+    },
+  },
+  {
+    name: "Vintage Khaki",
+    colors: ["#1A120B", "#3C2A21", "#D5CEA3", "#E5E5CB"],
+    vars: {
+      bg: "#1A120B", panel: "rgba(38, 26, 16, 0.88)", panelStrong: "rgba(38, 26, 16, 0.96)",
+      line: "rgba(213, 206, 163, 0.12)", lineStrong: "rgba(213, 206, 163, 0.23)",
+      text: "#E5E5CB", muted: "#BCB894", dim: "#9C9878",
+      gold: "#D5CEA3", goldSoft: "#C2BB90", onGold: "#1A120B", goldHover: "#E0D9B4",
+      woodDark: "#110B06", woodLight: "#2C1E13", glow: "#D5CEA3", glowDeep: "#3C2A21",
+    },
+  },
+  {
+    name: "Crimson Noir",
+    colors: ["#171717", "#444444", "#DA0037", "#EDEDED"],
+    vars: {
+      bg: "#121212", panel: "rgba(30, 30, 30, 0.88)", panelStrong: "rgba(30, 30, 30, 0.96)",
+      line: "rgba(232, 93, 132, 0.12)", lineStrong: "rgba(232, 93, 132, 0.23)",
+      text: "#EDEDED", muted: "#BBBBBB", dim: "#969696",
+      gold: "#E85D84", goldSoft: "#DE5578", onGold: "#1A0A10", goldHover: "#F07A9C",
+      woodDark: "#0B0B0B", woodLight: "#2A2A2A", glow: "#E85D84", glowDeep: "#444444",
+    },
+  },
+  {
+    name: "Bordeaux",
+    colors: ["#EEEBDD", "#810000", "#630000", "#1B1717"],
+    vars: {
+      bg: "#1B1717", panel: "rgba(42, 30, 30, 0.88)", panelStrong: "rgba(42, 30, 30, 0.96)",
+      line: "rgba(222, 90, 90, 0.12)", lineStrong: "rgba(222, 90, 90, 0.23)",
+      text: "#EEEBDD", muted: "#BCA9A9", dim: "#9A8787",
+      gold: "#DE5A5A", goldSoft: "#D95454", onGold: "#2A0505", goldHover: "#E57070",
+      woodDark: "#120E0E", woodLight: "#382222", glow: "#DE5A5A", glowDeep: "#630000",
+    },
+  },
+  {
+    name: "Emerald Deep",
+    colors: ["#191A19", "#1E5128", "#4E9F3D", "#D8E9A8"],
+    vars: {
+      bg: "#141511", panel: "rgba(30, 33, 27, 0.88)", panelStrong: "rgba(30, 33, 27, 0.96)",
+      line: "rgba(111, 180, 94, 0.12)", lineStrong: "rgba(111, 180, 94, 0.23)",
+      text: "#EDF3DC", muted: "#ACBF99", dim: "#8AA579",
+      gold: "#6FB45E", goldSoft: "#5DA34F", onGold: "#0C1608", goldHover: "#83C474",
+      woodDark: "#0C0E0B", woodLight: "#24331D", glow: "#6FB45E", glowDeep: "#1E5128",
+    },
+  },
+  {
+    name: "Royal Indigo",
+    colors: ["#0C134F", "#1D267D", "#5C469C", "#D4ADFC"],
+    vars: {
+      bg: "#0A0E3D", panel: "rgba(19, 26, 92, 0.88)", panelStrong: "rgba(19, 26, 92, 0.96)",
+      line: "rgba(212, 173, 252, 0.12)", lineStrong: "rgba(212, 173, 252, 0.23)",
+      text: "#EFE9FB", muted: "#B6ABDB", dim: "#9387BE",
+      gold: "#D4ADFC", goldSoft: "#BE97E3", onGold: "#170B2E", goldHover: "#E0C2FD",
+      woodDark: "#060828", woodLight: "#1B2270", glow: "#D4ADFC", glowDeep: "#5C469C",
+    },
+  },
+  {
+    name: "Teal Abyss",
+    colors: ["#092635", "#1B4242", "#5C8374", "#9EC8B9"],
+    vars: {
+      bg: "#092635", panel: "rgba(15, 53, 72, 0.88)", panelStrong: "rgba(15, 53, 72, 0.96)",
+      line: "rgba(158, 200, 185, 0.12)", lineStrong: "rgba(158, 200, 185, 0.23)",
+      text: "#EAF5F0", muted: "#ACCABD", dim: "#89AB9E",
+      gold: "#9EC8B9", goldSoft: "#82B5A2", onGold: "#0A2420", goldHover: "#B2D6C8",
+      woodDark: "#051820", woodLight: "#164052", glow: "#9EC8B9", glowDeep: "#1B4242",
+    },
+  },
+  {
+    name: "Slate Purple",
+    colors: ["#151515", "#301B3F", "#3C415C", "#B4A5A5"],
+    vars: {
+      bg: "#121212", panel: "rgba(31, 27, 38, 0.88)", panelStrong: "rgba(31, 27, 38, 0.96)",
+      line: "rgba(201, 182, 182, 0.12)", lineStrong: "rgba(201, 182, 182, 0.23)",
+      text: "#EFE9E9", muted: "#B4A5A5", dim: "#918484",
+      gold: "#C9B6B6", goldSoft: "#B4A5A5", onGold: "#1C1414", goldHover: "#D6C6C6",
+      woodDark: "#0C0C0C", woodLight: "#2C2140", glow: "#C9B6B6", glowDeep: "#301B3F",
+    },
+  },
+  {
+    name: "Magenta Night",
+    colors: ["#060047", "#B3005E", "#E90064", "#FF5F9E"],
+    vars: {
+      bg: "#050038", panel: "rgba(14, 11, 84, 0.88)", panelStrong: "rgba(14, 11, 84, 0.96)",
+      line: "rgba(255, 95, 158, 0.12)", lineStrong: "rgba(255, 95, 158, 0.23)",
+      text: "#FDEAF2", muted: "#CAA5C2", dim: "#A982A4",
+      gold: "#FF5F9E", goldSoft: "#F24E92", onGold: "#26001A", goldHover: "#FF7CAD",
+      woodDark: "#03002A", woodLight: "#1A0A63", glow: "#FF5F9E", glowDeep: "#B3005E",
+    },
+  },
+];
+
+const PALETTE_VAR_KEYS = {
+  bg: "--bg",
+  panel: "--panel",
+  panelStrong: "--panel-strong",
+  line: "--line",
+  lineStrong: "--line-strong",
+  text: "--text",
+  muted: "--muted",
+  dim: "--dim",
+  gold: "--gold",
+  goldSoft: "--gold-soft",
+  onGold: "--on-gold",
+  goldHover: "--gold-hover",
+  woodDark: "--wood-dark",
+  woodLight: "--wood-light",
+  glow: "--glow",
+  glowDeep: "--glow-deep",
+};
+
+function applyPalette(palette) {
+  const root = document.documentElement;
+  for (const [key, cssVar] of Object.entries(PALETTE_VAR_KEYS)) {
+    root.style.setProperty(cssVar, palette.vars[key]);
+  }
+  // ストライプはパレット本来の4色をそのまま使う
+  const stripe = document.querySelectorAll(".palette-stripe > span");
+  stripe.forEach((span, i) => {
+    if (palette.colors[i]) span.style.background = palette.colors[i];
+  });
+}
+
+function paletteElement(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+// パレットの4色を 41/26/18/15 の比率で並べたバーを作る
+function buildPaletteBar(palette) {
+  const bar = paletteElement("span", "palette-bar");
+  bar.setAttribute("aria-hidden", "true");
+  for (const color of palette.colors) {
+    const seg = document.createElement("span");
+    seg.style.background = color;
+    bar.appendChild(seg);
+  }
+  return bar;
+}
+
+function initPalette() {
+  const button = document.getElementById("palette-button");
+  const buttonSwatch = document.getElementById("palette-button-swatch");
+  const buttonName = document.getElementById("palette-button-name");
+  const menu = document.getElementById("palette-menu");
+  if (!button || !buttonSwatch || !buttonName || !menu) return;
+
+  function closeMenu() {
+    menu.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+  }
+  function openMenu() {
+    menu.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+  }
+
+  // 選択はその訪問中だけ有効（保存・復元はしない）
+  function selectPalette(index) {
+    const palette = PALETTES[index];
+    applyPalette(palette);
+    [...buttonSwatch.children].forEach((seg, i) => {
+      if (palette.colors[i]) seg.style.background = palette.colors[i];
+    });
+    buttonName.textContent = palette.name;
+    [...menu.children].forEach((item, i) => {
+      const selected = i === index;
+      item.classList.toggle("is-selected", selected);
+      item.setAttribute("aria-selected", String(selected));
+    });
+  }
+
+  PALETTES.forEach((palette, i) => {
+    const item = paletteElement("li", "palette-item");
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", "false");
+    item.tabIndex = -1;
+    const head = paletteElement("span", "palette-item-head");
+    head.appendChild(paletteElement("span", "palette-item-name", palette.name));
+    head.appendChild(paletteElement("span", "palette-check", "✓"));
+    item.appendChild(head);
+    item.appendChild(buildPaletteBar(palette));
+    item.addEventListener("click", () => {
+      selectPalette(i);
+      closeMenu();
+      button.focus();
+    });
+    menu.appendChild(item);
+  });
+
+  button.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (menu.hidden) openMenu();
+    else closeMenu();
+  });
+  // メニュー内のクリックで外側クリック判定にならないようにする
+  menu.addEventListener("click", (e) => e.stopPropagation());
+  document.addEventListener("click", closeMenu);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !menu.hidden) {
+      closeMenu();
+      button.focus();
+    }
+  });
+
+  // アクセスごとにランダムで1つ選ぶ（前回の選択は保存・復元しない）
+  selectPalette(Math.floor(Math.random() * PALETTES.length));
+}
+
+initPalette();
+

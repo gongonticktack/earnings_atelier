@@ -76,6 +76,9 @@
       </aside>
 
       <main class="main-content">
+        <div class="palette-stripe" aria-hidden="true">
+          <span class="s1"></span><span class="s2"></span><span class="s3"></span><span class="s4"></span>
+        </div>
         <header class="topbar">
           <div>
             <p class="eyebrow">FINANCIAL INTELLIGENCE</p>
@@ -83,6 +86,14 @@
             <span class="latest-update" id="latest-update">登録業績更新 —</span>
           </div>
           <div class="topbar-actions">
+            <div class="palette-dropdown" id="palette-dropdown">
+              <button type="button" class="palette-button" id="palette-button" aria-haspopup="listbox" aria-expanded="false" aria-label="カラーパレット">
+                <span class="palette-swatch" id="palette-button-swatch" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+                <span class="palette-button-name" id="palette-button-name"></span>
+                <span class="palette-caret" aria-hidden="true">▽</span>
+              </button>
+              <ul class="palette-menu" id="palette-menu" role="listbox" aria-label="カラーパレット" hidden></ul>
+            </div>
             <button class="refresh-button" id="refresh-button" type="button">
               <span class="refresh-icon">↻</span>
               <span id="refresh-button-label">更新</span>
