@@ -1062,6 +1062,12 @@ tbody tr.selected {
     text-overflow: ellipsis;
   }
 
+  /* パレットメニューはボタンの左端から開く（右端基準だと画面外にはみ出す） */
+  .topbar-actions .palette-menu {
+    left: 0;
+    right: auto;
+  }
+
   .topbar-actions .refresh-button {
     width: auto;
     height: 40px;
