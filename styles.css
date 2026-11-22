@@ -999,7 +999,7 @@ tbody tr.selected {
     display: block;
     width: 100%;
     height: auto;
-    padding: 76px 18px 17px;
+    padding: 68px 18px 17px;
   }
 
   .company-switcher {
@@ -1034,8 +1034,64 @@ tbody tr.selected {
     position: absolute;
     top: 16px;
     right: 15px;
+    left: 15px;
     justify-content: flex-end;
     margin: 0;
+  }
+
+  /* 上部コントロール行を画面幅に収める（パレットは伸縮、他2つは内容幅） */
+  .topbar-actions .palette-dropdown {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .topbar-actions .palette-button {
+    width: 100%;
+    height: 40px;
+    min-width: 0;
+    padding: 0 10px;
+    gap: 7px;
+  }
+
+  .topbar-actions .palette-swatch {
+    width: 40px;
+  }
+
+  .topbar-actions .palette-button-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .topbar-actions .refresh-button {
+    width: auto;
+    height: 40px;
+    flex: 0 0 auto;
+    padding: 0 12px;
+  }
+
+  /* 企業チップは全て同じ見た目で横スクロール（バーは隠す） */
+  .company-switcher {
+    scrollbar-width: none;
+  }
+
+  .company-switcher::-webkit-scrollbar {
+    display: none;
+  }
+
+  .company-button {
+    border-color: var(--line);
+    background: var(--panel);
+  }
+
+  .company-button strong {
+    white-space: nowrap;
+  }
+
+  .company-request-button {
+    width: 100%;
+    margin-top: 10px;
+    padding: 11px 12px;
+    font-size: 13px;
   }
 
   .documents-panel .panel-heading {
