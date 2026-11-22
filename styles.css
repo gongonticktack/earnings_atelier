@@ -41,11 +41,11 @@ body {
     repeating-linear-gradient(
       96deg,
       var(--wood-dark) 0,
-      #1d1813 36px,
+      color-mix(in srgb, var(--wood-dark) 55%, var(--wood-light)) 36px,
       var(--wood-light) 38px,
-      #100f0d 78px,
-      #2a2119 82px,
-      #12110f 142px
+      var(--wood-dark) 78px,
+      var(--wood-light) 82px,
+      var(--wood-dark) 142px
     );
   font-family: var(--font-body);
 }
@@ -100,7 +100,7 @@ body::after {
   overflow-y: auto;
   padding: 27px 19px 22px;
   border-right: 1px solid var(--line);
-  background: rgba(10, 10, 9, 0.78);
+  background: var(--panel);
   backdrop-filter: blur(24px);
 }
 
@@ -141,19 +141,19 @@ body::after {
 }
 
 .flow-mode-control { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 0; font-size: 14px; }
-.flow-mode-control select { padding: 10px 12px; border: 1px solid #65583a; border-radius: 8px; background: #24241c; color: #eee8dc; font: inherit; max-width: 100%; }
+.flow-mode-control select { padding: 10px 12px; border: 1px solid var(--gold-soft); border-radius: 8px; background: var(--panel-strong); color: var(--text); font: inherit; max-width: 100%; }
 .flow-mode-control .cumulative-flow-control { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .flow-mode-control input { accent-color: var(--gold); }
 .company-request-button {
   display: block; width: 100%; padding: 16px 12px; margin-top: 8px;
-  border: 1px dashed #a28a53; border-radius: 12px; color: #dbc58c;
+  border: 1px dashed var(--gold-soft); border-radius: 12px; color: var(--gold-hover);
   background: transparent; cursor: pointer; font: inherit; white-space: nowrap;
 }
-.company-request-button:hover { background: #c9ac6120; }
+.company-request-button:hover { background: color-mix(in srgb, var(--gold) 13%, transparent); }
 .company-request-dialog {
   position: fixed; width: min(460px, calc(100vw - 32px)); max-height: 85dvh;
-  box-sizing: border-box; padding: 30px 24px; border: 1px solid #65583a;
-  border-radius: 18px; color: #eee8dc; background: #191913;
+  box-sizing: border-box; padding: 30px 24px; border: 1px solid var(--gold-soft);
+  border-radius: 18px; color: var(--text); background: var(--panel-strong);
 }
 .company-request-dialog::backdrop { background: #000a; }
 .company-request-dialog h2 { margin: 0 24px 14px 0; font-size: 21px; }
@@ -161,11 +161,11 @@ body::after {
 .company-request-dialog label { display: block; margin: 20px 0 8px; font-size: 14px; }
 .company-request-dialog input {
   box-sizing: border-box; width: 100%; padding: 12px; font: inherit; font-size: 16px;
-  color: inherit; background: #24241c; border: 1px solid #65583a; border-radius: 8px;
+  color: inherit; background: var(--panel-strong); border: 1px solid var(--gold-soft); border-radius: 8px;
 }
 .company-request-dialog button[type="submit"] { margin-top: 24px; min-height: 44px; }
 .company-request-dialog button:disabled { opacity: .5; cursor: wait; }
-.company-request-dialog :focus-visible, .company-request-button:focus-visible { outline: 2px solid #dbc58c; outline-offset: 3px; }
+.company-request-dialog :focus-visible, .company-request-button:focus-visible { outline: 2px solid var(--gold-hover); outline-offset: 3px; }
 .company-switcher {
   display: grid;
   margin-top: 8px;
@@ -196,7 +196,7 @@ body::after {
 .company-button.active {
   border-color: var(--line);
   color: var(--text);
-  background: rgba(205, 177, 122, 0.09);
+  background: color-mix(in srgb, var(--gold) 9%, transparent);
 }
 
 .company-monogram,
@@ -374,7 +374,7 @@ h3 {
 }
 
 .topbar-actions .language-button:hover {
-  background: rgba(214, 183, 122, 0.1);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
 }
 
 .topbar-actions .refresh-button:focus-visible {
@@ -399,7 +399,7 @@ select {
   display: flex;
   align-items: center;
   padding: 11px 15px;
-  border: 1px solid rgba(214, 183, 122, 0.45);
+  border: 1px solid color-mix(in srgb, var(--gold) 45%, transparent);
   border-radius: 5px;
   color: var(--on-gold);
   cursor: pointer;
@@ -412,7 +412,7 @@ select {
 
 .refresh-button:hover {
   background: var(--gold-hover);
-  box-shadow: 0 8px 24px rgba(214, 183, 122, 0.15);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--gold) 15%, transparent);
   transform: translateY(-1px);
 }
 
@@ -449,8 +449,8 @@ select {
   padding: 28px 30px;
   border-radius: 9px;
   background:
-    linear-gradient(90deg, rgba(27, 26, 22, 0.94), rgba(27, 26, 22, 0.65)),
-    repeating-linear-gradient(95deg, #1b1713 0, #2b241b 22px, #151310 68px);
+    linear-gradient(90deg, color-mix(in srgb, var(--wood-light) 82%, transparent), color-mix(in srgb, var(--wood-light) 52%, transparent)),
+    repeating-linear-gradient(95deg, var(--wood-dark) 0, var(--wood-light) 22px, var(--wood-dark) 68px);
 }
 
 .hero-description {
@@ -501,9 +501,9 @@ select {
 }
 
 .quarter-field select {
-  border: 1px solid rgba(214, 183, 122, 0.42);
+  border: 1px solid color-mix(in srgb, var(--gold) 42%, transparent);
   color: var(--gold);
-  background: rgba(214, 183, 122, 0.07);
+  background: color-mix(in srgb, var(--gold) 7%, transparent);
 }
 
 .select-wrap {
@@ -537,7 +537,7 @@ select {
 
 .quarter-data .metric-card,
 .quarter-data > .panel {
-  border-top-color: rgba(214, 183, 122, 0.34);
+  border-top-color: color-mix(in srgb, var(--gold) 34%, transparent);
 }
 
 .quarter-data .metric-heading span:first-child {
@@ -649,7 +649,7 @@ select {
 .legend-bar {
   height: 7px;
   border-radius: 2px;
-  background: rgba(214, 183, 122, 0.58);
+  background: color-mix(in srgb, var(--gold) 58%, transparent);
 }
 
 .legend-line {
@@ -791,7 +791,7 @@ select {
   border: 1px solid var(--line);
   border-radius: 6px;
   gap: 10px;
-  background: rgba(214, 183, 122, 0.045);
+  background: color-mix(in srgb, var(--gold) 4.5%, transparent);
 }
 
 .investment-card small,
@@ -875,7 +875,7 @@ select {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: rgba(23, 21, 17, 0.9);
+  background: var(--panel-strong);
 }
 
 .stock-chart-status {
@@ -892,7 +892,7 @@ select {
 }
 
 .external-link:hover {
-  color: #e0c58f;
+  color: var(--gold-hover);
 }
 
 .table-wrap {
@@ -936,7 +936,7 @@ tbody tr {
 tbody tr:hover,
 tbody tr.selected {
   color: var(--text);
-  background: rgba(214, 183, 122, 0.045);
+  background: color-mix(in srgb, var(--gold) 4.5%, transparent);
 }
 
 .pdf-link {
@@ -955,7 +955,7 @@ tbody tr.selected {
   border: 1px solid var(--line-strong);
   border-radius: 5px;
   color: var(--text);
-  background: #24211b;
+  background: var(--panel-strong);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
   font-size: 11px;
   opacity: 0;
@@ -1173,7 +1173,7 @@ canvas[tabindex] { cursor: pointer; }
 .fib-line { border-top: 1px dashed #b7c2cf; }
 canvas[tabindex]:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.chart-tooltip { position: fixed; z-index: 30; width: min(340px, calc(100vw - 24px)); padding: 20px; background: #25241d; border: 1px solid var(--gold-soft); border-radius: 12px; box-shadow: 0 12px 36px #0009; max-height: 70vh; overflow-y: auto; }
+.chart-tooltip { position: fixed; z-index: 30; width: min(340px, calc(100vw - 24px)); padding: 20px; background: var(--panel-strong); border: 1px solid var(--gold-soft); border-radius: 12px; box-shadow: 0 12px 36px #0009; max-height: 70vh; overflow-y: auto; }
 .chart-tooltip[hidden] { display: none; }
 .chart-tooltip-close { float: right; width: 36px; height: 36px; border: 0; border-radius: 6px; color: var(--text); background: #ffffff0d; font-size: 22px; cursor: pointer; }
 .chart-tooltip h4 { margin: 0 40px 10px 0; font-size: 15px; line-height: 1.6; overflow-wrap: anywhere; }
